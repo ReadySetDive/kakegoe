@@ -188,15 +188,47 @@
 			border-radius: 1px;
 			background: rgba(232, 220, 216, 0.12);
 		}
-		/* A studio's red dot, held to record. The ring round it fills with the time used (--taken) */
+		/* A studio's red dot, held to record */
 		.record {
+			position: relative;
 			width: 3.6rem;
 			aspect-ratio: 1;
 			padding: 0;
 			border-radius: 50%;
-			background: radial-gradient(circle closest-side, hsl(3 85% 52%) 60%, transparent 63%), conic-gradient(hsl(3 90% 80%) calc(var(--taken, 0) * 360deg), #2c2323 0);
+			background: radial-gradient(circle closest-side, hsl(3 85% 52%) 60%, #2c2323 63%);
 			touch-action: none;
 			-webkit-touch-callout: none;
+		}
+		/* While recording, an arc over the dot, wide enough to show round a thumb (four of the dot's
+		   radii out), fills from left to right with the time used (--taken). It passes behind the
+		   buttons either side, its ends hidden under them */
+		.taken {
+			position: absolute;
+			z-index: -1;
+			left: 50%;
+			top: 50%;
+			width: calc(8 * 1.8rem);
+			translate: -50% -50%;
+			overflow: visible;
+			pointer-events: none;
+			opacity: 0;
+			transition: opacity 0.2s;
+		}
+		.recording .taken {
+			opacity: 1;
+		}
+		.taken path {
+			fill: none;
+			stroke-width: 3;
+			stroke-linecap: round;
+		}
+		.taken .track {
+			stroke: rgba(232, 220, 216, 0.14);
+		}
+		.taken .used {
+			stroke: hsl(3 90% 62%);
+			stroke-dasharray: 1;
+			stroke-dashoffset: calc(1 - var(--taken, 0));
 		}
 		.record.recording {
 			animation: listening 0.8s ease-in-out infinite alternate;
@@ -319,7 +351,7 @@
 	<nav class="bar">
 		<button class="from-file">ADD FILE</button>
 		<span class="divider"></span>
-		<button class="record" aria-label="Hold to record"></button>
+		<button class="record" aria-label="Hold to record"><svg class="taken" viewBox="-100 -100 200 200"><path class="track" d="M -100 0 A 100 100 0 0 1 100 0" pathLength="1"/><path class="used" d="M -100 0 A 100 100 0 0 1 100 0" pathLength="1"/></svg></button>
 		<span class="divider"></span>
 		<button class="from-web">ADD URL</button>
 		<input type="file" accept="audio/*" hidden>
