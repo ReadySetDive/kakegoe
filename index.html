@@ -18,8 +18,8 @@
 			height: 100%;
 			background: #141010;
 			overflow: hidden;
-			/* No zoom, selection or long-press menus when tapping fast */
-			touch-action: manipulation;
+			/* No scrolling, zooming (two fingers at once is the norm here), selection or long-press menus */
+			touch-action: none;
 			user-select: none;
 			-webkit-user-select: none;
 			-webkit-touch-callout: none;
@@ -79,7 +79,8 @@
 		}
 		/* A fingertip-sized grab area around the small dot */
 		/* How far through the recording a held press has got: a faint ring just outside the button,
-		   filling clockwise from the top, which fades in only once a press has been held a moment */
+		   filling clockwise from the top. It fades in once a press has been held a moment, and a second
+		   finger can grab its leading end and drag it round to scrub */
 		.ring {
 			position: absolute;
 			inset: -6%;
@@ -100,6 +101,16 @@
 			stroke-dasharray: 1;
 			stroke-dashoffset: calc(1 - var(--through, 0));
 		}
+		.ring .head {
+			fill: rgba(255, 225, 215, 0.55);
+			stroke: none;
+			transform-origin: 50px 50px;
+			rotate: calc(var(--through, 0) * 360deg);
+			transition: r 0.15s;
+		}
+		.ring.scrubbing .head {
+			r: 2.6;
+		}
 		.dot::before {
 			content: "";
 			position: absolute;
@@ -112,7 +123,7 @@
 	</style>
 </head>
 <body>
-	<button aria-label="Yoooo! (play the call)"><span class="dial"><span class="dot" title="Drag to change pitch"></span></span><svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="49" pathLength="1"/></svg></button>
+	<button aria-label="Yoooo! (play the call)"><span class="dial"><span class="dot" title="Drag to change pitch"></span></span><svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="49" pathLength="1"/><circle class="head" cx="99" cy="50" r="1.6"/></svg></button>
 	<script type="module">
 		// Lets iPhones play it even with the ring/silent switch on silent
 		if (navigator.audioSession) navigator.audioSession.type = "playback"
@@ -174,8 +185,8 @@
 			const channels = Array.from({ length: call.numberOfChannels }, (_, channel) => call.getChannelData(channel))
 			node.port.postMessage({ channels })
 			node.port.onmessage = ({ data }) => {
-				const shown = data.progress.find((press) => press.id === ringPress)
-				if (shown) ring.style.setProperty("--through", Math.max(0, Math.min(1, shown.through)))
+				const shown = data.progress?.find((press) => press.id === ringPress)
+				if (shown && !scrubbing) showThrough(shown.through)
 			}
 			node.connect(volume).connect(limiter).connect(audio.destination)
 			return node
@@ -194,6 +205,18 @@
 		let ringPress = null // the press whose progress the ring shows
 		let ringDelay
 		const RING_DELAY = 400 // ms a press must be held before its progress ring fades in
+		const RING_GRAB = 0.2 // how near the ring's leading end, in button radii, counts as grabbing it
+		let scrubbing = null // the pointer dragging the ring's end: its angle and how far through it is
+
+		function showThrough(through) {
+			ring.style.setProperty("--through", Math.max(0, Math.min(1, through)))
+		}
+
+		// Clockwise from 12 o'clock, in turns
+		function turnsAround(event) {
+			const { x, y } = centre()
+			return Math.atan2(event.clientX - x, y - event.clientY) / (2 * Math.PI)
+		}
 
 		// note: this call's own pitch, on top of the knob's (1 is as recorded); part: which stretch of
 		// it; press: the held press that steers it, if any
@@ -330,8 +353,10 @@
 				const press = pressOf.get(event.pointerId)
 				if (press) {
 					pressOf.delete(event.pointerId)
-					voices.then((node) => node.port.postMessage({ release: press }))
-					if (press === ringPress) {
+					// Mid-scrub, the press lasts until the scrubbing finger lifts too
+					const scrubbed = press === ringPress && scrubbing !== null
+					if (!scrubbed) voices.then((node) => node.port.postMessage({ release: press }))
+					if (press === ringPress && !scrubbed) {
 						clearTimeout(ringDelay)
 						ring.classList.remove("showing")
 					}
@@ -403,6 +428,46 @@
 			clearTimeout(unpress)
 			unpress = setTimeout(() => held.size || button.classList.remove("pressed"), 60)
 		}, { passive: false })
+
+		// Grabbing the ring's leading end scrubs that press's call. Listened for on the whole page,
+		// ahead of the button, because the ring lies partly outside the button
+		addEventListener("pointerdown", (event) => {
+			if (!ring.classList.contains("showing")) return
+			const { x, y, radius } = centre()
+			const through = Number(ring.style.getPropertyValue("--through"))
+			const angle = through * 2 * Math.PI
+			const end = { x: x + Math.sin(angle) * radius * 1.1, y: y - Math.cos(angle) * radius * 1.1 }
+			if (Math.hypot(event.clientX - end.x, event.clientY - end.y) > radius * RING_GRAB) return
+			event.preventDefault()
+			event.stopPropagation()
+			document.body.setPointerCapture(event.pointerId)
+			scrubbing = { pointerId: event.pointerId, turns: turnsAround(event), through }
+			ring.classList.add("scrubbing")
+			if (audio.state !== "running") audio.resume()
+		}, { capture: true })
+		document.body.addEventListener("pointermove", (event) => {
+			if (event.pointerId !== scrubbing?.pointerId) return
+			// Follow the drag round the circle by its change in angle, so crossing 12 o'clock doesn't jump
+			const turns = turnsAround(event)
+			const moved = ((turns - scrubbing.turns + 1.5) % 1) - 0.5
+			scrubbing.turns = turns
+			scrubbing.through = Math.max(0, Math.min(1, scrubbing.through + moved))
+			showThrough(scrubbing.through)
+			const press = ringPress
+			voices.then((node) => node.port.postMessage({ scrub: press, through: scrubbing.through }))
+		})
+		for (const release of ["pointerup", "pointercancel"]) {
+			document.body.addEventListener(release, (event) => {
+				if (event.pointerId !== scrubbing?.pointerId) return
+				scrubbing = null
+				ring.classList.remove("scrubbing")
+				// Still held on the button, the press goes back to being steered; otherwise it plays on
+				const press = ringPress
+				const stillHeld = [...pressOf.values()].includes(press)
+				voices.then((node) => node.port.postMessage(stillHeld ? { scrub: press, through: null } : { release: press }))
+				if (!stillHeld) ring.classList.remove("showing")
+			})
+		}
 
 		// Which way is up, in the phone's own axes (x to its right, y to its top, z out of the screen)
 		let up = null

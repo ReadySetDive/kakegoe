@@ -7,8 +7,9 @@
 // A copy whose press is still held is steered: its speed follows the bends and the phone's roll,
 // down to zero, holding one moment indefinitely, and below, where grains read backwards so it plays
 // truly reversed. Held, it never runs off either end of its part; it waits there, silent, to be
-// played on or back again, and its progress is reported so the page can show it. Let go, it plays
-// on at normal speed from wherever it is.
+// played on or back again. Let go, it plays on at normal speed from wherever it is. A copy can
+// also be scrubbed: dragged to places in its part, sounding only while it moves, like tape under a
+// finger. The progress of every held copy is reported, so the page can show and scrub it.
 //
 // Grains are placed by WSOLA: each new grain may slide a few milliseconds from where it would
 // naturally start, to wherever the recording best matches what the previous grain is playing as
@@ -24,6 +25,8 @@ const MATCH = 256 // how many samples are compared when judging a line-up
 const STRIDE = 4 // compare every fourth sample and slide in steps of four: plenty for a smooth join, and cheap
 const SPEED_EASE = 0.2 // share of the way a copy's speed moves to the asked-for one each 128-sample block, so changes never click
 const REPORT_EVERY = 4 // blocks between progress reports, about 12 ms
+const SCRUB_CATCH_UP = 128 * 6 // a scrubbed copy closes the gap to where it is dragged over about this many samples
+const SCRUB_FULL = 0.5 // a scrubbed copy moving at this share of normal speed or faster sounds at full volume
 
 class Voices extends AudioWorkletProcessor {
 	static get parameterDescriptors() {
@@ -39,9 +42,12 @@ class Voices extends AudioWorkletProcessor {
 		this.port.onmessage = ({ data }) => {
 			if ("channels" in data) this.recording = data.channels
 			// note, from, to, and for a held press its id
-			else if ("note" in data) this.voices.push({ ...data, held: data.id !== undefined, speed: 1, grains: null })
+			else if ("note" in data) this.voices.push({ ...data, held: data.id !== undefined, scrubTo: null, speed: 1, loudness: 1, grains: null })
 			else if ("release" in data) {
-				for (const voice of this.voices) if (voice.id === data.release) voice.held = false
+				for (const voice of this.voices) if (voice.id === data.release) Object.assign(voice, { held: false, scrubTo: null })
+			} else if ("scrub" in data) {
+				// through: how far into its part to drag the copy (0 to 1), or null to stop scrubbing
+				for (const voice of this.voices) if (voice.id === data.scrub) Object.assign(voice, { held: true, scrubTo: data.through })
 			} else this.heldSpeed = data.heldSpeed
 		}
 	}
@@ -88,7 +94,16 @@ class Voices extends AudioWorkletProcessor {
 				const grains = voice.from === 0 ? [{ start: -HOP * pitch, age: HOP, direction: 1 }] : []
 				Object.assign(voice, { position: voice.from, untilGrain: 0, grains })
 			}
-			voice.speed += ((voice.held ? this.heldSpeed : 1) - voice.speed) * SPEED_EASE
+			const scrubbing = voice.scrubTo !== null
+			let wanted = voice.held ? this.heldSpeed : 1
+			if (scrubbing) {
+				const target = voice.from + voice.scrubTo * (voice.to - voice.from)
+				wanted = Math.max(-4, Math.min(4, (target - voice.position) / SCRUB_CATCH_UP))
+			}
+			voice.speed += (wanted - voice.speed) * (scrubbing ? 0.5 : SPEED_EASE)
+			// Scrubbed, a copy sounds only while it moves, louder the faster, like tape under a finger
+			const loudness = scrubbing ? Math.min(1, Math.abs(voice.speed) / SCRUB_FULL) : 1
+			voice.loudness += (loudness - voice.loudness) * 0.3
 			for (let i = 0; i < out[0].length; i++) {
 				if (voice.untilGrain-- <= 0 && voice.position >= voice.from && voice.position < voice.to) {
 					const direction = voice.speed < 0 ? -1 : 1
@@ -110,16 +125,16 @@ class Voices extends AudioWorkletProcessor {
 					const between = at - index
 					for (let channel = 0; channel < out.length; channel++) {
 						const samples = this.recording[Math.min(channel, this.recording.length - 1)]
-						out[channel][i] += (samples[index] + (samples[index + 1] - samples[index]) * between) * fade
+						out[channel][i] += (samples[index] + (samples[index + 1] - samples[index]) * between) * fade * voice.loudness
 					}
 				}
 				if (voice.grains[0]?.age >= GRAIN) voice.grains.shift()
 			}
 		}
 		this.voices = this.voices.filter((voice) => voice.held || (voice.position >= voice.from && voice.position < voice.to) || voice.grains.length)
-		const held = this.voices.filter((voice) => voice.held && voice.grains)
-		if (++this.blocks % REPORT_EVERY === 0 && held.length) {
-			this.port.postMessage({ progress: held.map((voice) => ({ id: voice.id, through: (voice.position - voice.from) / (voice.to - voice.from) })) })
+		const pressed = this.voices.filter((voice) => voice.held && voice.grains)
+		if (++this.blocks % REPORT_EVERY === 0 && pressed.length) {
+			this.port.postMessage({ progress: pressed.map((voice) => ({ id: voice.id, through: (voice.position - voice.from) / (voice.to - voice.from) })) })
 		}
 		return true
 	}
