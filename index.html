@@ -60,14 +60,6 @@
 			pointer-events: none;
 			transform: rotate(var(--turn, 0deg));
 		}
-		/* Wheel turns step the knob like a ratchet, each step easing into place with a slight
-		   overshoot; letting go after wheel turns springs it back to normal */
-		.dial.cogging, .dial.cogging .dot {
-			transition: transform 0.16s cubic-bezier(0.3, 1.4, 0.5, 1), rotate 0.16s cubic-bezier(0.3, 1.4, 0.5, 1);
-		}
-		.dial.springing, .dial.springing .dot {
-			transition: transform 0.5s cubic-bezier(0.3, 1.5, 0.5, 1), rotate 0.5s cubic-bezier(0.3, 1.5, 0.5, 1);
-		}
 		.dot {
 			position: absolute;
 			top: 50%;
@@ -112,15 +104,26 @@
 		// Within this many degrees of 3 o'clock the knob is drawn softly back to normal pitch
 		const DETENT = 12
 		const WHEEL_DEGREES_PER_PIXEL = 0.1 // a wheel notch (about 100 px) turns the knob 10 degrees
+		// The knob is drawn by a spring chasing where it has been turned to: wheel notches settle
+		// briskly with a touch of overshoot, letting go after wheel turns swings it home bouncier
+		const SPRINGS = {
+			step: { stiffness: 420, damping: 30 },
+			home: { stiffness: 160, damping: 14 },
+		}
 		// Pressing within this share of the diameter, measured from the centre, also bends the call;
 		// dragging this share of the radius away from the press reaches the bend's limits
 		const BEND_ZONE = 0.78
 		const BEND_REACH = 0.6
+		// Except loudness upward, which is deliberately hard to max out: 4x is three radii up, far
+		// off the button, and the curve is shallow at first (one radius up is only about 1.2x)
+		const LOUDEST = 4
+		const LOUDNESS_REACH = 3
+		const LOUDNESS_CURVE = 2.5
 		const TILT_DEGREES = 8
 
 		const audio = new AudioContext()
 		const volume = audio.createGain()
-		// Many overlapping calls at up to 2.5x volume would clip; this holds them just under full scale
+		// Many overlapping calls at up to 4x volume would clip; this holds them just under full scale
 		const limiter = new DynamicsCompressorNode(audio, { threshold: -3, knee: 0, ratio: 20, attack: 0.002, release: 0.1 })
 		// Every press becomes a voice in one granular player (voices.js), so pitch and speed bend
 		// independently, live, on every call already sounding
@@ -150,24 +153,58 @@
 			node.parameters.get(parameter).setTargetAtTime(value, audio.currentTime, seconds)
 		}
 
-		// `seconds` is how long the pitch takes to follow; wheel steps and spring-backs glide audibly
-		function turnKnob(degrees, seconds = 0.02, motion = "") {
-			dial.className = `dial ${motion}`
+		const knob = { shown: 0, target: 0, velocity: 0, spring: SPRINGS.step, moving: false }
+
+		// motion: "drag" follows the hand exactly; "step" and "home" spring there (see SPRINGS)
+		function turnKnob(degrees, motion) {
 			hand = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, degrees))
 			// Eases to zero near the centre, so dwelling close to normal settles there, while
 			// matching the hand exactly at the detent's edge so there is never a jump
-			const knob = Math.abs(hand) < DETENT ? hand * (hand / DETENT) ** 2 : hand
-			dial.style.setProperty("--turn", `${-knob}deg`)
-			glide("pitch", 2 ** (knob / KNOB_LIMIT), seconds)
+			knob.target = Math.abs(hand) < DETENT ? hand * (hand / DETENT) ** 2 : hand
+			if (motion === "drag") {
+				knob.shown = knob.target
+				knob.velocity = 0
+				showKnob()
+				return
+			}
+			knob.spring = SPRINGS[motion]
+			if (!knob.moving) {
+				knob.moving = true
+				let then = performance.now()
+				requestAnimationFrame(function step(now) {
+					const seconds = Math.min((now - then) / 1000, 1 / 30)
+					then = now
+					const { stiffness, damping } = knob.spring
+					knob.velocity += ((knob.target - knob.shown) * stiffness - knob.velocity * damping) * seconds
+					knob.shown += knob.velocity * seconds
+					const settled = Math.abs(knob.target - knob.shown) < 0.01 && Math.abs(knob.velocity) < 0.1
+					if (settled) knob.shown = knob.target
+					showKnob()
+					knob.moving = !settled
+					if (knob.moving) requestAnimationFrame(step)
+				})
+			}
 		}
 
-		// across: -1 (dragged fully left) .. 1 (right); down: -1 (fully up) .. 1 (down)
-		function bend(across, down) {
+		// The pitch follows the drawn knob, so its springy settle can be heard as well as seen
+		function showKnob() {
+			dial.style.setProperty("--turn", `${-knob.shown}deg`)
+			glide("pitch", 2 ** (knob.shown / KNOB_LIMIT), 0.01)
+		}
+
+		// Offsets of the drag from where the middle was pressed, in px
+		function bend(right, down) {
+			const limit = (value) => Math.max(-1, Math.min(1, value))
+			const across = limit(right / bending.reach)
+			const lowering = limit(down / bending.reach)
 			// The button tips toward the drag, as if pressed off-centre
-			button.style.setProperty("--tilt-x", `${-down * TILT_DEGREES}deg`)
+			button.style.setProperty("--tilt-x", `${-lowering * TILT_DEGREES}deg`)
 			button.style.setProperty("--tilt-y", `${across * TILT_DEGREES}deg`)
-			glide("speed", across < 0 ? 1 + across * 0.8 : 1 + across * 0.75) // 0.2x .. 1.75x
-			volume.gain.setTargetAtTime(down < 0 ? 1 - down * 1.5 : 1 - down * 0.8, audio.currentTime, 0.02) // 2.5x .. 0.2x
+			// Speed along a curve, so fine changes near normal are easy: 0.2x fully left, 3.5x fully right
+			glide("speed", across < 0 ? 0.2 ** -across : 3.5 ** across)
+			const lift = limit(-down / (bending.radius * LOUDNESS_REACH))
+			const loudness = lift > 0 ? 1 + (LOUDEST - 1) * lift ** LOUDNESS_CURVE : 1 - 0.8 * lowering // down to 0.2x
+			volume.gain.setTargetAtTime(loudness, audio.currentTime, 0.02)
 		}
 
 		function centre() {
@@ -185,7 +222,7 @@
 		dot.addEventListener("pointermove", (event) => {
 			if (!dot.hasPointerCapture(event.pointerId)) return
 			const { x, y } = centre()
-			turnKnob(Math.atan2(y - event.clientY, event.clientX - x) * 180 / Math.PI)
+			turnKnob(Math.atan2(y - event.clientY, event.clientX - x) * 180 / Math.PI, "drag")
 		})
 
 		// On press rather than click: the sound starts the instant a finger lands
@@ -197,14 +234,13 @@
 			play()
 			const { x, y, radius } = centre()
 			if (!bending && Math.hypot(event.clientX - x, event.clientY - y) < radius * BEND_ZONE) {
-				bending = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, reach: radius * BEND_REACH }
+				bending = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, reach: radius * BEND_REACH, radius }
 				button.classList.add("bending")
 			}
 		})
 		button.addEventListener("pointermove", (event) => {
 			if (event.pointerId !== bending?.pointerId) return
-			const limit = (value) => Math.max(-1, Math.min(1, value))
-			bend(limit((event.clientX - bending.x) / bending.reach), limit((event.clientY - bending.y) / bending.reach))
+			bend(event.clientX - bending.x, event.clientY - bending.y)
 		})
 		for (const release of ["pointerup", "pointercancel"]) {
 			button.addEventListener(release, (event) => {
@@ -213,14 +249,14 @@
 					button.classList.remove("pressed")
 					if (wheelTurned) {
 						wheelTurned = false
-						turnKnob(0, 0.12, "springing")
+						turnKnob(0, "home")
 					}
 				}
 				if (event.pointerId === bending?.pointerId) {
 					// Let go and the button springs back flat, the call back to normal speed and volume
+					bend(0, 0)
 					bending = null
 					button.classList.remove("bending")
-					bend(0, 0)
 				}
 			})
 		}
@@ -240,7 +276,7 @@
 			// While the button is held down, the wheel turns the pitch knob instead of pressing
 			if (held.size) {
 				const pixels = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 33 : event.deltaY
-				turnKnob(hand - pixels * WHEEL_DEGREES_PER_PIXEL, 0.05, "cogging")
+				turnKnob(hand - pixels * WHEEL_DEGREES_PER_PIXEL, "step")
 				wheelTurned = true
 				return
 			}

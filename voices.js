@@ -1,11 +1,19 @@
 // Plays any number of overlapping copies of the call. Each copy is rebuilt from short, overlapping,
 // faded grains of the recording: how fast it moves through the recording is its speed, and how fast
 // each grain is read is its pitch, so the two bend independently, live, on every copy at once.
-// At normal speed and pitch the grains line up exactly and rebuild the recording untouched.
+//
+// Grains are placed by WSOLA: each new grain may slide a few milliseconds from where it would
+// naturally start, to wherever the recording best matches what the previous grain is playing as
+// they cross-fade. Unaligned grains half-cancel each other at a steady rate, which is what makes
+// plain granular stretching flutter and chop when slowed down; aligned ones join seamlessly. At
+// normal speed and pitch the best match is no slide at all, so the recording comes back untouched.
 
-const GRAIN = 2048 // samples, about 46 ms
+const GRAIN = 1024 // samples, about 23 ms
 const HOP = GRAIN / 2 // two grains always overlap, and their fades sum to exactly one
 const FADE = Float32Array.from({ length: GRAIN }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / GRAIN))
+const SEARCH = 256 // how far, in samples either way, a grain may slide to line up: a voice's pitch period or two
+const MATCH = 256 // how many samples are compared when judging a line-up
+const STRIDE = 4 // compare every fourth sample and slide in steps of four: plenty for a smooth join, and cheap
 
 class Voices extends AudioWorkletProcessor {
 	static get parameterDescriptors() {
@@ -25,6 +33,33 @@ class Voices extends AudioWorkletProcessor {
 		}
 	}
 
+	// Where, near `natural`, the recording best continues what is heard at `continuing`, both read
+	// at `pitch`. Searches outward from no slide and only moves for a strictly better match.
+	lineUp(natural, continuing, pitch) {
+		const samples = this.recording[0]
+		const last = samples.length - 1 - MATCH * pitch
+		if (continuing < 0 || continuing > last) return natural
+		let best = natural
+		let bestScore = -Infinity
+		for (let slide = 0; slide <= SEARCH; slide = slide > 0 ? -slide : -slide + STRIDE) {
+			const start = natural + slide
+			if (start < 0 || start > last) continue
+			let together = 0
+			let energy = 1e-9
+			for (let j = 0; j < MATCH; j += STRIDE) {
+				const candidate = samples[Math.floor(start + j * pitch)]
+				together += candidate * samples[Math.floor(continuing + j * pitch)]
+				energy += candidate * candidate
+			}
+			const score = together / Math.sqrt(energy)
+			if (score > bestScore + 1e-9) {
+				best = start
+				bestScore = score
+			}
+		}
+		return best
+	}
+
 	process(_inputs, outputs, parameters) {
 		const pitch = parameters.pitch[0]
 		const speed = parameters.speed[0]
@@ -36,7 +71,9 @@ class Voices extends AudioWorkletProcessor {
 			const voice = this.voices[v]
 			for (let i = 0; i < out[0].length; i++) {
 				if (voice.untilGrain-- <= 0 && voice.position < length) {
-					voice.grains.push({ start: voice.position, age: 0 })
+					const previous = voice.grains[voice.grains.length - 1]
+					const continuing = previous.start + previous.age * pitch
+					voice.grains.push({ start: this.lineUp(voice.position, continuing, pitch), age: 0 })
 					voice.untilGrain = HOP - 1
 				}
 				voice.position += speed
