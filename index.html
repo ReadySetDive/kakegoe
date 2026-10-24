@@ -124,10 +124,7 @@
 			dial.style.setProperty("--turn", `${-knob}deg`)
 			// Calls already sounding bend with the knob too
 			for (const voice of playing) voice.playbackRate.setTargetAtTime(pitch(), audio.currentTime, 0.01)
-			try { localStorage.setItem("knob", knob) } catch {}
 		}
-
-		try { turnKnob(Number(localStorage.getItem("knob")) || 0) } catch {}
 
 		dot.addEventListener("pointerdown", (event) => {
 			// Grabbing the dot turns the knob instead of pressing the button
