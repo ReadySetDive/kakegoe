@@ -101,6 +101,16 @@
 			stroke-dasharray: 1;
 			stroke-dashoffset: calc(1 - var(--through, 0));
 		}
+		/* The recording's loudness, as spikes radiating from the ring: dim ahead of the held press,
+		   lit where it has played */
+		.ring .bar {
+			stroke: rgba(255, 255, 255, 0.13);
+			stroke-width: 0.9;
+			stroke-linecap: round;
+		}
+		.ring .bar.played {
+			stroke: rgba(255, 215, 205, 0.55);
+		}
 		.ring .head {
 			fill: rgba(255, 225, 215, 0.55);
 			stroke: none;
@@ -133,8 +143,10 @@
 		const dot = document.querySelector(".dot")
 		const ring = document.querySelector(".ring")
 
-		// The knob turns 150 degrees either way from 3 o'clock: up an octave at the top, down one at the bottom
-		const KNOB_LIMIT = 150
+		// The knob spins all the way round. From 3 o'clock, 150 degrees up is an octave up and 150
+		// down an octave down; the 60 degrees between, around 9 o'clock, sweep smoothly from one to the
+		// other, so pitch has no jump anywhere on the dial
+		const OCTAVE_TURN = 150
 		// Within this many degrees of 3 o'clock the knob is drawn softly back to normal pitch
 		const DETENT = 12
 		const WHEEL_DEGREES_PER_PIXEL = 0.1 // a wheel notch (about 100 px) turns the knob 10 degrees
@@ -184,6 +196,7 @@
 			const call = await audio.decodeAudioData(await (await fetch("yo.mp3")).arrayBuffer())
 			const channels = Array.from({ length: call.numberOfChannels }, (_, channel) => call.getChannelData(channel))
 			node.port.postMessage({ channels })
+			drawWaveform(channels[0])
 			node.port.onmessage = ({ data }) => {
 				const shown = data.progress?.find((press) => press.id === ringPress)
 				if (shown && !scrubbing) showThrough(shown.through)
@@ -208,8 +221,40 @@
 		const RING_GRAB = 0.2 // how near the ring's leading end, in button radii, counts as grabbing it
 		let scrubbing = null // the pointer dragging the ring's end: its angle and how far through it is
 
+		const WAVE_BARS = 160
+		const WAVE_FROM = 51.5 // ring units (the ring itself is radius 49 in a 100-wide view)
+		const WAVE_REACH = 11 // how far the loudest moment's spike reaches beyond WAVE_FROM
+		const bars = []
+
+		// One spike per slice of the recording, clockwise from 12 o'clock, as long as the slice is loud
+		function drawWaveform(samples) {
+			const slice = Math.floor(samples.length / WAVE_BARS)
+			const loudness = Array.from({ length: WAVE_BARS }, (_, bar) => {
+				let energy = 0
+				for (let i = bar * slice; i < (bar + 1) * slice; i++) energy += samples[i] ** 2
+				return Math.sqrt(energy / slice)
+			})
+			const loudest = Math.max(...loudness)
+			const head = ring.querySelector(".head")
+			loudness.forEach((level, bar) => {
+				// The ring's view is turned a quarter back, so angle 0 here sits at 12 o'clock
+				const angle = ((bar + 0.5) / WAVE_BARS) * 2 * Math.PI
+				const reach = WAVE_FROM + 1 + (level / loudest) * WAVE_REACH
+				const line = document.createElementNS("http://www.w3.org/2000/svg", "line")
+				line.setAttribute("class", "bar")
+				line.setAttribute("x1", 50 + Math.cos(angle) * WAVE_FROM)
+				line.setAttribute("y1", 50 + Math.sin(angle) * WAVE_FROM)
+				line.setAttribute("x2", 50 + Math.cos(angle) * reach)
+				line.setAttribute("y2", 50 + Math.sin(angle) * reach)
+				ring.insertBefore(line, head)
+				bars.push(line)
+			})
+		}
+
 		function showThrough(through) {
-			ring.style.setProperty("--through", Math.max(0, Math.min(1, through)))
+			through = Math.max(0, Math.min(1, through))
+			ring.style.setProperty("--through", through)
+			bars.forEach((bar, index) => bar.classList.toggle("played", (index + 0.5) / WAVE_BARS <= through))
 		}
 
 		// Clockwise from 12 o'clock, in turns
@@ -242,7 +287,7 @@
 
 		// motion: "drag" follows the hand exactly; "step" and "home" spring there (see SPRINGS)
 		function turnKnob(degrees, motion) {
-			hand = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, degrees))
+			hand = degrees
 			aimKnob()
 			if (motion === "drag") {
 				knob.shown = knob.target
@@ -273,8 +318,21 @@
 			// The hand's turn eases to zero near the centre, so dwelling close to normal settles there,
 			// while matching the hand exactly at the detent's edge so there is never a jump. Raising
 			// the phone has its own gentler well (see eased) and goes on top
-			const turned = Math.abs(hand) < DETENT ? hand * (hand / DETENT) ** 2 : hand
-			knob.target = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, turned + raise))
+			const fromNormal = around(hand)
+			const settled = Math.abs(fromNormal) < DETENT ? fromNormal * (fromNormal / DETENT) ** 2 : fromNormal
+			knob.target = hand - fromNormal + settled + raise
+		}
+
+		// An angle as the nearest equivalent between -180 and 180 degrees
+		function around(degrees) {
+			return ((((degrees + 180) % 360) + 360) % 360) - 180
+		}
+
+		function octaves(degrees) {
+			const angle = around(degrees)
+			if (Math.abs(angle) <= OCTAVE_TURN) return angle / OCTAVE_TURN
+			const across = ((angle > 0 ? angle : angle + 360) - OCTAVE_TURN) / (360 - 2 * OCTAVE_TURN)
+			return Math.cos(Math.PI * across)
 		}
 
 		function eased(tilt) {
@@ -286,7 +344,7 @@
 		// The pitch follows the drawn knob, so its springy settle can be heard as well as seen
 		function showKnob() {
 			dial.style.setProperty("--turn", `${-knob.shown}deg`)
-			glide("pitch", 2 ** (knob.shown / KNOB_LIMIT), 0.01)
+			glide("pitch", 2 ** octaves(knob.shown), 0.01)
 		}
 
 		// Offsets of the drag from where the middle was pressed, in px
@@ -320,7 +378,8 @@
 		dot.addEventListener("pointermove", (event) => {
 			if (!dot.hasPointerCapture(event.pointerId)) return
 			const { x, y } = centre()
-			turnKnob(Math.atan2(y - event.clientY, event.clientX - x) * 180 / Math.PI, "drag")
+			const angle = Math.atan2(y - event.clientY, event.clientX - x) * 180 / Math.PI
+			turnKnob(hand + around(angle - hand), "drag")
 		})
 
 		// On press rather than click: the sound starts the instant a finger lands
@@ -369,7 +428,7 @@
 					rollSpeed = 1
 					restingRoll = null
 					steer()
-					turnKnob(wheelTurned ? 0 : hand, "home")
+					turnKnob(wheelTurned ? Math.round(hand / 360) * 360 : hand, "home")
 					wheelTurned = false
 				}
 				if (event.pointerId === bending?.pointerId) {
