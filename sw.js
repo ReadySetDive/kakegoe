@@ -10,6 +10,7 @@ const FILES = [
 	"button.js",
 	"button.css",
 	"voices.js",
+	"fonts/OpenDyslexic-Bold.woff",
 	...SOUNDS.flatMap(({ folder }) => [
 		`${folder}/`,
 		`${folder}/index.html`,
