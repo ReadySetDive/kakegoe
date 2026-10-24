@@ -1,0 +1,190 @@
+html, body {
+	margin: 0;
+	height: 100%;
+	background: #141010;
+	overflow: hidden;
+	/* No scrolling, zooming (two fingers at once is the norm here), selection or long-press menus */
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
+}
+body {
+	display: grid;
+	place-items: center;
+}
+/* The button sits in its socket: both share one spot, the button on top */
+body > * {
+	grid-area: 1 / 1;
+}
+/* Each sound's page colors its button by setting --hue on its body */
+.call {
+	z-index: 1;
+	width: min(62vmin, 340px);
+	aspect-ratio: 1;
+	border-radius: 50%;
+	border: none;
+	cursor: pointer;
+	background: radial-gradient(circle at 38% 32%, hsl(var(--hue) 100% 68%), hsl(var(--hue) 83% 46%) 45%, hsl(var(--hue) 89% 30%) 100%);
+	box-shadow: 0 1.6vmin 0 hsl(var(--hue) 94% 18%), 0 3vmin 6vmin rgba(0, 0, 0, 0.6), inset 0 -1vmin 3vmin rgba(0, 0, 0, 0.35);
+	position: relative;
+	touch-action: none;
+	/* --rise and --swell: working loose as the knob is unscrewed */
+	transform: perspective(90vmin) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)) translateY(calc(var(--sink, 0vmin) - var(--rise, 0vmin))) scale(calc(var(--squeeze, 1) * var(--swell, 1)));
+	/* Released, it springs back with a little overshoot */
+	transition: transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1), box-shadow 60ms;
+}
+.call.pressed {
+	--sink: 1.2vmin;
+	--squeeze: 0.97;
+	transition: transform 60ms, box-shadow 60ms;
+	box-shadow: 0 0.4vmin 0 hsl(var(--hue) 94% 18%), 0 1.5vmin 3vmin rgba(0, 0, 0, 0.6), inset 0 -0.5vmin 2vmin rgba(0, 0, 0, 0.45);
+}
+/* Tilting follows the finger closely while the middle is held and dragged */
+.call.bending {
+	transition: transform 40ms linear, box-shadow 60ms;
+}
+/* Unscrewed all the way, it pops off and flies away, spinning */
+.lifted .call {
+	transform: perspective(90vmin) translateY(-80vh) rotate(-540deg) scale(1.15);
+	opacity: 0;
+	pointer-events: none;
+	transition: transform 0.9s cubic-bezier(0.55, -0.35, 0.75, 0.4), opacity 0.5s 0.4s;
+}
+/* Coming back, it screws down into the socket and lands with a clunk */
+.call.landing {
+	transition: transform 0.7s cubic-bezier(0.2, 1.4, 0.4, 1), opacity 0.2s;
+}
+/* Under the button: a dark recess holding a record button, red whatever the button's color */
+.socket {
+	width: min(62vmin, 340px);
+	aspect-ratio: 1;
+	border-radius: 50%;
+	display: grid;
+	place-items: center;
+	background: radial-gradient(circle at 50% 40%, #1d1515, #0b0808 70%);
+	box-shadow: inset 0 1.2vmin 3vmin rgba(0, 0, 0, 0.85), 0 0 0 0.5vmin #2a1d1c;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.3s;
+}
+.lifted .socket {
+	opacity: 1;
+	pointer-events: auto;
+}
+.record {
+	position: relative;
+	width: 40%;
+	aspect-ratio: 1;
+	border-radius: 50%;
+	border: 1.4vmin solid #2e2120;
+	cursor: pointer;
+	touch-action: none;
+	background: radial-gradient(circle at 40% 35%, #ff5d4f, #c8150c 55%, #7a0904);
+	transition: box-shadow 0.2s;
+}
+.record.recording {
+	animation: listening 0.8s ease-in-out infinite alternate;
+}
+@keyframes listening {
+	to {
+		box-shadow: 0 0 5vmin rgba(255, 70, 50, 0.65);
+	}
+}
+/* How much of the recording's time limit is used */
+.taken {
+	position: absolute;
+	inset: -22%;
+	rotate: -90deg;
+	overflow: visible;
+	pointer-events: none;
+	opacity: 0;
+}
+.recording .taken {
+	opacity: 1;
+}
+.taken circle {
+	fill: none;
+	stroke: rgba(255, 215, 205, 0.4);
+	stroke-width: 2;
+	stroke-dasharray: 1;
+	stroke-dashoffset: calc(1 - var(--taken, 0));
+}
+/* The knob's marker: a dimple near the rim, turned by rotating this full-size layer */
+.dial {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	transform: rotate(var(--turn, 0deg));
+}
+.dot {
+	position: absolute;
+	top: 50%;
+	right: 6%;
+	width: 9%;
+	aspect-ratio: 1;
+	translate: 0 -50%;
+	border-radius: 50%;
+	/* A shallow dimple pressed into the button: shaded at its top, catching light at its
+	   bottom. Counter-rotated so that light keeps coming from above as the knob turns */
+	rotate: calc(var(--turn, 0deg) * -1);
+	background: radial-gradient(circle at 50% 65%, hsl(var(--hue) 85% 42%), hsl(var(--hue) 88% 35%));
+	box-shadow: inset 0 0.5vmin 0.8vmin hsl(var(--hue) 100% 12% / 0.45), inset 0 -0.3vmin 0.4vmin hsl(var(--hue) 100% 70% / 0.25);
+	pointer-events: auto;
+	cursor: grab;
+	touch-action: none;
+}
+/* A fingertip-sized grab area around the small dot */
+.dot::before {
+	content: "";
+	position: absolute;
+	inset: -120%;
+	border-radius: 50%;
+}
+.dot:active {
+	cursor: grabbing;
+}
+/* How far through the recording a held press has got: a faint ring just outside the button,
+   filling clockwise from the top. It fades in once a press has been held a moment, and a second
+   finger can grab its leading end and drag it round to scrub */
+.ring {
+	position: absolute;
+	inset: -6%;
+	rotate: -90deg;
+	overflow: visible;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 0.35s;
+}
+.ring.showing {
+	opacity: 1;
+}
+.ring circle {
+	fill: none;
+	stroke: hsl(var(--hue) 100% 90% / 0.3);
+	stroke-width: 1.2;
+	stroke-linecap: round;
+	stroke-dasharray: 1;
+	stroke-dashoffset: calc(1 - var(--through, 0));
+}
+/* The recording's loudness, as spikes radiating from the ring: dim ahead of the held press,
+   lit where it has played */
+.ring .bar {
+	stroke: rgba(255, 255, 255, 0.13);
+	stroke-width: 0.9;
+	stroke-linecap: round;
+}
+.ring .bar.played {
+	stroke: hsl(var(--hue) 100% 90% / 0.55);
+}
+.ring .head {
+	fill: hsl(var(--hue) 100% 92% / 0.55);
+	stroke: none;
+	transform-origin: 50px 50px;
+	rotate: calc(var(--through, 0) * 360deg);
+	transition: r 0.15s;
+}
+.ring.scrubbing .head {
+	r: 2.6;
+}

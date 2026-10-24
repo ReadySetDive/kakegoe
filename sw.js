@@ -2,15 +2,24 @@
 // every request goes to the network first (revalidating past the browser's HTTP cache), and the
 // cached copy is only the fallback. Updates to the site therefore need no version bumps here.
 const CACHE = "kakegoe"
-const FILES = [
+// Every sound's folder holds the same files; a new sound needs only its folder adding here
+const SOUNDS = [
 	"./",
-	"index.html",
-	"yo.mp3",
+	"fahhh/",
+]
+const FILES = [
+	"button.js",
+	"button.css",
 	"voices.js",
-	"manifest.webmanifest",
-	"icon-192.png",
-	"icon-512.png",
-	"apple-touch-icon.png",
+	...SOUNDS.flatMap((folder) => [
+		folder,
+		`${folder}index.html`,
+		`${folder}sound.mp3`,
+		`${folder}manifest.webmanifest`,
+		`${folder}icon-192.png`,
+		`${folder}icon-512.png`,
+		`${folder}apple-touch-icon.png`,
+	]),
 ]
 
 self.addEventListener("install", (event) => {
