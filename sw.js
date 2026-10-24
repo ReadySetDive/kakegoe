@@ -1,6 +1,7 @@
-// Keeps the whole app on the device, so it opens instantly and works with no signal.
-// Bump VERSION whenever a file changes, or installed copies keep the old one.
-const VERSION = "kakegoe-3"
+// Keeps the app working with no signal, while always showing the latest version when online:
+// every request goes to the network first (revalidating past the browser's HTTP cache), and the
+// cached copy is only the fallback. Updates to the site therefore need no version bumps here.
+const CACHE = "kakegoe"
 const FILES = [
 	"./",
 	"index.html",
@@ -12,15 +13,31 @@ const FILES = [
 ]
 
 self.addEventListener("install", (event) => {
-	event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll(FILES)))
+	event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES.map((file) => new Request(file, { cache: "reload" })))))
 	self.skipWaiting()
 })
 
 self.addEventListener("activate", (event) => {
-	event.waitUntil(caches.keys().then((names) => Promise.all(names.filter((name) => name !== VERSION).map((name) => caches.delete(name)))))
-	self.clients.claim()
+	event.waitUntil((async () => {
+		// Earlier versions served stale copies forever from caches with other names; when replacing
+		// one, reload its open windows so they pick up the current site straight away
+		const stale = (await caches.keys()).filter((name) => name !== CACHE)
+		await Promise.all(stale.map((name) => caches.delete(name)))
+		await self.clients.claim()
+		if (stale.length) {
+			for (const client of await self.clients.matchAll({ type: "window" })) client.navigate(client.url)
+		}
+	})())
 })
 
 self.addEventListener("fetch", (event) => {
-	event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)))
+	event.respondWith((async () => {
+		try {
+			const fresh = await fetch(event.request, { cache: "no-cache" })
+			if (fresh.ok) (await caches.open(CACHE)).put(event.request, fresh.clone())
+			return fresh
+		} catch {
+			return (await caches.match(event.request, { ignoreSearch: true })) || Response.error()
+		}
+	})())
 })
