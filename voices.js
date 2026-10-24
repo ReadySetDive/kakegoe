@@ -1,7 +1,8 @@
 // Plays any number of overlapping copies of the call. Each copy is rebuilt from short, overlapping,
 // faded grains of the recording: how fast it moves through the recording is its speed, and how fast
 // each grain is read is its pitch, so the two bend independently, live, on every copy at once.
-// Each copy can also carry its own pitch on top (a note played on the number keys). Speed may go
+// Each copy can also carry its own pitch on top (a note played on the number keys), and play only
+// part of the recording (from and to, in seconds). Speed may go
 // to zero, holding one moment of the call indefinitely, or below it, where grains read backwards
 // so the call plays truly reversed.
 //
@@ -31,7 +32,7 @@ class Voices extends AudioWorkletProcessor {
 		this.recording = [] // one Float32Array per channel
 		this.voices = []
 		this.port.onmessage = ({ data }) => {
-			if ("note" in data) this.voices.push({ note: data.note, grains: null })
+			if ("note" in data) this.voices.push({ note: data.note, from: data.from, to: data.to, grains: null })
 			else this.recording = data.channels
 		}
 	}
@@ -72,19 +73,24 @@ class Voices extends AudioWorkletProcessor {
 		for (const voice of this.voices) {
 			const pitch = knobPitch * voice.note
 			if (!voice.grains) {
-				// A new copy starts with a grain already at full strength, so its first moment is not
-				// faded in. Started while running backwards, it plays the call backwards from its end
+				voice.from = Math.round(voice.from * sampleRate)
+				voice.to = Math.min(length - 2, Math.round(voice.to * sampleRate))
+				// Started while running backwards, a copy plays its part backwards from the part's end
 				const direction = speed < 0 ? -1 : 1
-				const position = direction > 0 ? 0 : length - 2
-				Object.assign(voice, { position, untilGrain: 0, grains: [{ start: position - HOP * pitch * direction, age: HOP, direction }] })
+				const position = direction > 0 ? voice.from : voice.to
+				// Starting at an edge of the recording, a copy begins with a grain already at full strength,
+				// so its first moment is not faded in; starting mid-sound, it fades in to avoid a click
+				const atEdge = direction > 0 ? voice.from === 0 : voice.to === length - 2
+				const grains = atEdge ? [{ start: position - HOP * pitch * direction, age: HOP, direction }] : []
+				Object.assign(voice, { position, untilGrain: 0, grains })
 			}
 			for (let i = 0; i < out[0].length; i++) {
-				if (voice.untilGrain-- <= 0 && voice.position >= 0 && voice.position < length) {
+				if (voice.untilGrain-- <= 0 && voice.position >= voice.from && voice.position < voice.to) {
 					const direction = speed < 0 ? -1 : 1
 					const previous = voice.grains[voice.grains.length - 1]
-					const continuing = previous.start + previous.age * pitch * previous.direction
+					const continuing = previous && previous.start + previous.age * pitch * previous.direction
 					// Grains only line up with ones read the same way; at a reversal they just cross-fade
-					const start = previous.direction === direction ? this.lineUp(voice.position, continuing, pitch * direction) : voice.position
+					const start = previous?.direction === direction ? this.lineUp(voice.position, continuing, pitch * direction) : voice.position
 					voice.grains.push({ start, age: 0, direction })
 					voice.untilGrain = HOP - 1
 				}
@@ -103,7 +109,7 @@ class Voices extends AudioWorkletProcessor {
 				if (voice.grains[0]?.age >= GRAIN) voice.grains.shift()
 			}
 		}
-		this.voices = this.voices.filter((voice) => (voice.position >= 0 && voice.position < length) || voice.grains.length)
+		this.voices = this.voices.filter((voice) => (voice.position >= voice.from && voice.position < voice.to) || voice.grains.length)
 		return true
 	}
 }

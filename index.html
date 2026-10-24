@@ -122,6 +122,13 @@
 		const TILT_DEGREES = 8
 		// Number keys 1-8 play the call up a major scale, do to do, in semitones above as recorded
 		const SCALE = [0, 2, 4, 5, 7, 9, 11, 12]
+		// Key 0 cycles what the number keys play: the whole call, just the shouted "yo", or just its
+		// ethereal tail. The shout ends and the steady tone takes over 1.17 s in (measured)
+		const PARTS = [
+			{ from: 0, to: Infinity },
+			{ from: 0, to: 1.17 },
+			{ from: 1.17, to: Infinity },
+		]
 		// Phones: raising the top edge turns the knob up, this many knob degrees per degree raised
 		// from how it was held when the app opened. Rolling it onto its side slows the call to a
 		// standstill, and on over to face down plays it backwards
@@ -151,12 +158,12 @@
 		let wheelTurned = false // the wheel turned the knob during this hold, so it springs back after
 		const held = new Set() // pointers currently holding the button or the knob
 
-		// note: this call's own pitch, on top of the knob's (1 is as recorded)
-		async function play(note = 1) {
+		// note: this call's own pitch, on top of the knob's (1 is as recorded); part: which stretch of it
+		async function play(note = 1, part = PARTS[0]) {
 			// Browsers only allow sound after a touch, so wake the audio on the press itself
 			if (audio.state !== "running") audio.resume()
 			const node = await voices
-			node.port.postMessage({ note })
+			node.port.postMessage({ note, ...part })
 		}
 
 		async function glide(parameter, value, seconds = 0.02) {
@@ -286,11 +293,19 @@
 		button.addEventListener("contextmenu", (event) => event.preventDefault())
 
 		let unflash
+		let keyPart = 0
 		addEventListener("keydown", (event) => {
-			const degree = Number(event.key) - 1
 			// One note per keypress: holding a key down would otherwise machine-gun it
-			if (!(degree in SCALE) || event.repeat) return
-			play(2 ** (SCALE[degree] / 12))
+			if (event.repeat) return
+			if (event.key === "0") {
+				// Playing the newly chosen part is how you know which one is chosen
+				keyPart = (keyPart + 1) % PARTS.length
+				play(1, PARTS[keyPart])
+			} else {
+				const degree = Number(event.key) - 1
+				if (!(degree in SCALE)) return
+				play(2 ** (SCALE[degree] / 12), PARTS[keyPart])
+			}
 			button.classList.add("pressed")
 			clearTimeout(unflash)
 			unflash = setTimeout(() => held.size || button.classList.remove("pressed"), 90)
