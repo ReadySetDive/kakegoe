@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<!-- A sound's button as its icon, photographed by make-icons.sh. ?hue= colors it; ?kind= is
+	     "floating" (the button and its shadow on nothing, for platforms that keep icons see-through)
+	     or "filling" (the button's face across the whole square, for platforms that crop icons to
+	     a shape of their own and fill anything see-through with black or white) -->
+	<link rel="stylesheet" href="../button.css">
+	<style>
+		html, body {
+			background: none;
+		}
+		/* The page's button is 62vmin wide; scaling it grows its shadows along with it. It sits a
+		   little high, since its shadow falls downward */
+		.floating .call {
+			scale: 1.2;
+			translate: 0 -3.5vmin;
+		}
+		/* Wide enough to cover the square's corners, edge and all: 141vmin across the diagonal, over
+		   62vmin, and a little more */
+		.filling .call {
+			scale: 2.4;
+		}
+	</style>
+</head>
+<body>
+	<button class="call"><span class="dial"><span class="dot"></span></span></button>
+	<script>
+		const options = new URLSearchParams(location.search)
+		document.body.style.setProperty("--hue", options.get("hue"))
+		document.body.className = options.get("kind")
+	</script>
+</body>
+</html>

@@ -15,7 +15,7 @@ Each sound is a folder at the repo root, named after the sound in lowercase, hol
 
 - `sound.mp3`
 - `index.html`, `manifest.webmanifest`
-- `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`
+- `icon-192.png`, `icon-512.png`, `maskable-512.png`, `apple-touch-icon.png`
 
 and one entry in `sounds.js`. The home page and the offline cache (`sw.js`) both read `sounds.js`,
 so nothing else needs to change.
@@ -49,12 +49,10 @@ so nothing else needs to change.
 
 5. **Make the folder.** Copy `fahhh/index.html` and `fahhh/manifest.webmanifest`, replacing
    FAHHH with the new name. The manifest's description is "One <color> button. <the sound, written
-   out>!". Make the icons by rotating the red KAKEGOE icons (hue 3) to the new hue:
+   out>!". Make the icons, photographed from the button itself:
 
    ```sh
-   for icon in icon-192.png icon-512.png apple-touch-icon.png; do
-   	ffmpeg -i kakegoe/$icon -vf hue=h=<new hue - 3> <folder>/$icon
-   done
+   tools/make-icons.sh <folder> <hue>
    ```
 
    Look at the result to check it is the colour you meant.

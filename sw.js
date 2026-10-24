@@ -18,6 +18,7 @@ const FILES = [
 		`${folder}/manifest.webmanifest`,
 		`${folder}/icon-192.png`,
 		`${folder}/icon-512.png`,
+		`${folder}/maskable-512.png`,
 		`${folder}/apple-touch-icon.png`,
 	]),
 ]
