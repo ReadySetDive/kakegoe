@@ -40,10 +40,12 @@
 			color: hsl(var(--hue) 70% 82%);
 			text-decoration: none;
 			-webkit-tap-highlight-color: transparent;
-			/* Pressing and holding opens this page's own menu, not the phone's or a text selection */
+			/* Pressing and holding opens this page's own options, not the phone's menu or a text selection */
 			-webkit-touch-callout: none;
 			-webkit-user-select: none;
 			user-select: none;
+			/* Dragging off a button chooses from its options, rather than scrolling the page */
+			touch-action: none;
 		}
 		/* A small copy of the sound's button, in its color */
 		.sound::before {
@@ -84,7 +86,7 @@
 			flex: 1;
 			color: #b3a5a1;
 		}
-		button, .save {
+		button {
 			font: inherit;
 			letter-spacing: inherit;
 			color: inherit;
@@ -143,17 +145,39 @@
 			border-radius: 50%;
 			background: #e8dcd8;
 		}
-		/* Under the button pressed and held */
-		.menu {
+		/* Around the button pressed and held, or dragged off: its options on a faint ring, each at
+		   its own angle (--angle), the one dragged toward lit */
+		.radial {
 			inset: auto;
 			margin: 0;
-			translate: -50% 0;
-			padding: 0.4rem;
+			padding: 0;
+			width: 0;
+			height: 0;
+			overflow: visible;
 			border: none;
-			border-radius: 999px;
-			background: #1d1717;
+			background: none;
 			color: inherit;
+		}
+		.radial::before {
+			content: "";
+			position: absolute;
+			width: calc(2 * var(--reach));
+			aspect-ratio: 1;
+			translate: -50% -50%;
+			border-radius: 50%;
+			border: 2px solid rgba(232, 220, 216, 0.08);
+		}
+		.radial button {
+			position: absolute;
+			translate: calc(cos(var(--angle)) * var(--reach) - 50%) calc(sin(var(--angle)) * var(--reach) - 50%);
+			white-space: nowrap;
+			background: #1d1717;
 			box-shadow: 0 1vmin 4vmin rgba(0, 0, 0, 0.6);
+			transition: scale 0.1s, background 0.1s;
+		}
+		.radial button.chosen {
+			scale: 1.12;
+			background: #4a3a39;
 		}
 		/* A bin: deleting a recording is for good */
 		.bin {
@@ -182,11 +206,9 @@
 		<ol class="recordings"></ol>
 	</section>
 	<template class="recording">
-		<li><button class="play" aria-label="Play">&#9654;</button><span class="when"></span><button class="promote">PROMOTE</button><a class="save">SAVE</a><button class="bin" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button></li>
+		<li><button class="play" aria-label="Play">&#9654;</button><span class="when"></span><button class="promote">PROMOTE</button><button class="save">SAVE MP3</button><button class="bin" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button></li>
 	</template>
-	<div class="menu" popover="manual">
-		<button class="demote">DEMOTE</button>
-	</div>
+	<div class="radial" popover="manual"></div>
 	<dialog class="promoting">
 		<form method="dialog">
 			<span class="sound preview"></span>

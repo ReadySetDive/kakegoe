@@ -1,6 +1,18 @@
 // The button shared by every sound. Each sound's page sits in its own folder, beside its
 // sound.mp3. The page loads sounds.js, listing the built-in sounds, and saved.js, holding the
 // buttons made on this device, ahead of this
+
+// Opened by the home page's INSTALL: opening doesn't play the call, and the first press does
+// nothing but bring up the browser's offer to install (iPhones make no such offer)
+const openedToInstall = new URLSearchParams(location.search).has("install")
+let installOffer = null
+if (openedToInstall) {
+	addEventListener("beforeinstallprompt", (event) => {
+		event.preventDefault()
+		installOffer = event
+	})
+}
+
 const folder = location.pathname.split("/").at(-2)
 const thisSound = SOUNDS.find((sound) => sound.folder === folder) ?? await savedButton(folder)
 
@@ -371,6 +383,7 @@ dot.addEventListener("pointermove", (event) => {
 // On press rather than click: the sound starts the instant a finger lands
 button.addEventListener("pointerdown", (event) => {
 	event.preventDefault()
+	if (installOffer) return
 	button.setPointerCapture(event.pointerId)
 	held.add(event.pointerId)
 	button.classList.add("pressed")
@@ -551,6 +564,13 @@ addEventListener("deviceorientation", ({ beta, gamma }) => {
 		showKnob()
 	}
 })
+// The offer to install can only be made on a completed tap, not as a finger lands
+button.addEventListener("click", () => {
+	if (!installOffer) return
+	installOffer.prompt()
+	installOffer = null
+	history.replaceState(null, "", location.pathname)
+})
 // iPhones share motion only once the person allows it, which can only be asked on a tap
 if (typeof DeviceOrientationEvent?.requestPermission === "function") {
 	button.addEventListener("click", () => DeviceOrientationEvent.requestPermission(), { once: true })
@@ -560,7 +580,7 @@ if (typeof DeviceOrientationEvent?.requestPermission === "function") {
 // screen or desktop is itself the button. Only while the browser allows sound without a touch:
 // a call it held back would otherwise go off late, alongside the touch that finally wakes it
 const WAKE_WAIT = 200 // ms the browser has to wake the audio before it counts as not allowed
-let away = true // opening the page counts as coming back
+let away = !openedToInstall // opening the page counts as coming back
 async function comeBack() {
 	if (!away || document.hidden) return
 	away = false
