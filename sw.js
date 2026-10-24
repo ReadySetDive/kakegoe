@@ -6,6 +6,11 @@ importScripts("sounds.js", "saved.js", "icons.js")
 const FILES = [
 	"./",
 	"index.html",
+	"manifest.webmanifest",
+	"icon-192.png",
+	"icon-512.png",
+	"maskable-512.png",
+	"apple-touch-icon.png",
 	"home.js",
 	"sounds.js",
 	"saved.js",
@@ -50,7 +55,10 @@ self.addEventListener("activate", (event) => {
 })
 
 self.addEventListener("fetch", (event) => {
-	const custom = new URL(event.request.url).pathname.match(/\/custom\/(\w+)\/([\w.-]*)$/)
+	const url = new URL(event.request.url)
+	// Sounds fetched from other sites, to be added to the soundboard, are copied in by the page
+	if (url.origin !== location.origin) return
+	const custom = url.pathname.match(/\/custom\/(\w+)\/([\w.-]*)$/)
 	if (custom) return event.respondWith(customFile(...custom.slice(1)))
 	event.respondWith((async () => {
 		try {
@@ -100,6 +108,7 @@ async function customFile(id, file) {
 				start_url: "./",
 				scope: "./",
 				display: "standalone",
+				launch_handler: { client_mode: "focus-existing" },
 				orientation: "portrait",
 				background_color: "#141010",
 				theme_color: "#141010",

@@ -19,11 +19,12 @@ function saved(storeName, mode, work) {
 	})
 }
 
-// recordedOn: the name of the button it was recorded on
-function saveRecording(samples, sampleRate, recordedOn) {
+// name: only for sounds added from a file or the web, or demoted from a button; recordings made
+// here go by when they were made
+function saveRecording(samples, sampleRate, name) {
 	// Asks the browser not to clear the site's storage when the device runs short of space
 	navigator.storage?.persist()
-	return keepRecording({ sound: wav(samples, sampleRate), recordedOn, at: Date.now() })
+	return keepRecording({ sound: wav(samples, sampleRate), name, at: Date.now() })
 }
 
 // Into the recent list, which holds only the latest few
@@ -50,8 +51,12 @@ async function promote(recording, name, hue) {
 
 // A button goes back to being a recording, the newest, named after the button
 async function demote(button) {
-	await keepRecording({ sound: button.sound, recordedOn: button.name, at: Date.now() })
+	await keepRecording({ sound: button.sound, name: button.name, at: Date.now() })
 	await saved("buttons", "readwrite", (buttons) => buttons.delete(button.id))
+}
+
+function rename(button, name, hue) {
+	return saved("buttons", "readwrite", (buttons) => buttons.put({ ...button, name: name.toUpperCase(), hue }))
 }
 
 function savedButtons() {

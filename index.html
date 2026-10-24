@@ -5,8 +5,11 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<title>Soundboard</title>
 	<meta name="theme-color" content="#141010">
-	<!-- No manifest: an app installed from here would claim every sound's folder below, and phones
-	     would then refuse to install the sounds as apps of their own -->
+	<!-- Its manifest scopes it to this page alone: claiming the whole folder, it would take in every
+	     sound's folder below, and phones would refuse to install the sounds as apps of their own -->
+	<link rel="manifest" href="manifest.webmanifest">
+	<link rel="icon" href="icon-192.png">
+	<link rel="apple-touch-icon" href="apple-touch-icon.png">
 	<style>
 		@font-face {
 			font-family: OpenDyslexic;
@@ -97,22 +100,22 @@
 			cursor: pointer;
 			text-decoration: none;
 		}
-		.promoting {
+		dialog {
 			border: none;
 			border-radius: 1.2rem;
 			padding: 2rem 2.4rem;
 			background: #1d1717;
 			color: inherit;
 		}
-		.promoting::backdrop {
+		dialog::backdrop {
 			background: rgba(0, 0, 0, 0.65);
 		}
-		.promoting form {
+		dialog form {
 			display: grid;
 			justify-items: center;
 			gap: 1.4rem;
 		}
-		.promoting input[name="name"] {
+		dialog input:not([type="range"]) {
 			width: 12rem;
 			padding: 0.5rem 0.8rem;
 			border: 2px solid #3a2f2e;
@@ -121,29 +124,48 @@
 			color: inherit;
 			font: inherit;
 			text-align: center;
+		}
+		dialog input[name="name"] {
 			text-transform: uppercase;
 		}
 		/* The color, picked off a rainbow */
-		.promoting input[type="range"] {
+		dialog input[type="range"] {
 			appearance: none;
 			width: 14rem;
 			height: 0.8rem;
 			border-radius: 999px;
 			background: linear-gradient(to right, hsl(0 85% 50%), hsl(60 85% 50%), hsl(120 85% 50%), hsl(180 85% 50%), hsl(240 85% 50%), hsl(300 85% 50%), hsl(360 85% 50%));
 		}
-		.promoting input[type="range"]::-webkit-slider-thumb {
+		dialog input[type="range"]::-webkit-slider-thumb {
 			appearance: none;
 			width: 1.5rem;
 			aspect-ratio: 1;
 			border-radius: 50%;
 			background: #e8dcd8;
 		}
-		.promoting input[type="range"]::-moz-range-thumb {
+		dialog input[type="range"]::-moz-range-thumb {
 			width: 1.5rem;
 			height: 1.5rem;
 			border: none;
 			border-radius: 50%;
 			background: #e8dcd8;
+		}
+		.problem {
+			max-width: 16rem;
+			margin: 0;
+			text-align: center;
+			font-size: 0.8rem;
+			color: hsl(3 90% 72%);
+		}
+		.adding {
+			display: flex;
+			flex-wrap: wrap;
+			justify-content: center;
+			gap: 0.8rem;
+			font-size: 0.85rem;
+		}
+		.adding button {
+			color: #b3a5a1;
 		}
 		/* Around the button pressed and held, or dragged off: its options on a faint ring, each at
 		   its own angle (--angle), the one dragged toward lit */
@@ -208,13 +230,26 @@
 	<template class="recording">
 		<li><button class="play" aria-label="Play">&#9654;</button><span class="when"></span><button class="promote">PROMOTE</button><button class="save">SAVE MP3</button><button class="bin" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button></li>
 	</template>
+	<nav class="adding">
+		<button class="from-file">ADD FROM FILE</button>
+		<button class="from-web">ADD FROM URL</button>
+		<input type="file" accept="audio/*" multiple hidden>
+	</nav>
 	<div class="radial" popover="manual"></div>
-	<dialog class="promoting">
+	<!-- Naming a button and picking its color, to promote a sound or rename a button -->
+	<dialog class="naming">
 		<form method="dialog">
 			<span class="sound preview"></span>
-			<input name="name" placeholder="NAME" maxlength="20" required autocomplete="off">
 			<input name="hue" type="range" min="0" max="359" aria-label="Color">
-			<div class="choices"><button value="cancel" formnovalidate>CANCEL</button><button value="promote">PROMOTE</button></div>
+			<input name="name" placeholder="NAME" maxlength="20" required autocomplete="off">
+			<div class="choices"><button type="button" class="cancel">CANCEL</button><button value="confirm" class="confirm"></button></div>
+		</form>
+	</dialog>
+	<dialog class="fetching">
+		<form>
+			<input name="url" type="url" placeholder="https://" required autocomplete="off">
+			<p class="problem" hidden></p>
+			<div class="choices"><button type="button" class="cancel">CANCEL</button><button>ADD</button></div>
 		</form>
 	</dialog>
 </body>

@@ -1,9 +1,10 @@
 #!/bin/sh
 # Draws a sound's icons from its button (tools/icon.html), photographed by headless Chrome.
-# Usage: tools/make-icons.sh <folder> <hue>
+# Usage: tools/make-icons.sh <folder> <hue> [<hue of the lower-left half, for a split button>]
 set -e
 folder=$1
 hue=$2
+split=${3:+&split=$3}
 chrome=${CHROME:-"/c/Program Files/Google/Chrome/Application/chrome.exe"}
 # Chrome on Windows needs Windows paths
 root=$(cd "$(dirname "$0")/.." && (pwd -W 2>/dev/null || pwd))
@@ -14,7 +15,7 @@ work=$(mktemp -d)
 photograph() {
 	"$chrome" --headless=new --disable-gpu --hide-scrollbars --allow-file-access-from-files \
 		--user-data-dir="$work/profile" --default-background-color=00000000 --window-size=512,512 \
-		--screenshot="$2" "file:///$root/tools/icon.html?hue=$hue&kind=$1" 2>/dev/null
+		--screenshot="$2" "file:///$root/tools/icon.html?hue=$hue$split&kind=$1" 2>/dev/null
 }
 shrink() {
 	ffmpeg -v error -y -i "$1" -vf "scale=$3:$3:flags=lanczos" "$2"

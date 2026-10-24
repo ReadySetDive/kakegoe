@@ -5,7 +5,8 @@
 	<!-- A sound's button as its icon, photographed by make-icons.sh. ?hue= colors it; ?kind= is
 	     "floating" (the button and its shadow on nothing, for platforms that keep icons see-through)
 	     or "filling" (the button's face across the whole square, for platforms that crop icons to
-	     a shape of their own and fill anything see-through with black or white) -->
+	     a shape of their own and fill anything see-through with black or white). ?split= colors
+	     the button's lower-left half, below the diagonal from its top left to its bottom right -->
 	<link rel="stylesheet" href="../button.css">
 	<style>
 		html, body {
@@ -22,6 +23,12 @@
 		.filling .call {
 			scale: 2.4;
 		}
+		/* A second button on the first, in the other color, cut down to the lower-left half: the cut
+		   reaches past the button to take in its rim. It casts no shadow, the first already does */
+		.split {
+			clip-path: polygon(-50% -50%, 150% 150%, -50% 150%);
+			box-shadow: 0 1.6vmin 0 hsl(var(--hue) 94% 18%), inset 0 -1vmin 3vmin rgba(0, 0, 0, 0.35);
+		}
 	</style>
 </head>
 <body>
@@ -30,6 +37,12 @@
 		const options = new URLSearchParams(location.search)
 		document.body.style.setProperty("--hue", options.get("hue"))
 		document.body.className = options.get("kind")
+		if (options.has("split")) {
+			const lower = document.querySelector(".call").cloneNode(true)
+			lower.classList.add("split")
+			lower.style.setProperty("--hue", options.get("split"))
+			document.body.append(lower)
+		}
 	</script>
 </body>
 </html>
