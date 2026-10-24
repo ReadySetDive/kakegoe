@@ -206,3 +206,70 @@ body > * {
 	letter-spacing: 0.04em;
 	color: hsl(var(--hue) 70% 82%);
 }
+/* Opened to edit: the crop arc over the button, its kept stretch and spikes lit, the cut ones dim,
+   a handle at either end; the held press's own ring isn't shown */
+.editing .ring {
+	display: none;
+}
+.cropper {
+	position: absolute;
+	inset: -6%;
+	overflow: visible;
+	pointer-events: none;
+}
+.cropper path {
+	fill: none;
+	stroke-linecap: round;
+}
+.cropper .track {
+	stroke: rgba(255, 255, 255, 0.1);
+	stroke-width: 1.2;
+}
+.cropper .kept {
+	stroke: hsl(var(--hue) 100% 85% / 0.7);
+	stroke-width: 1.6;
+}
+.cropper .bar {
+	stroke: hsl(var(--hue) 100% 90% / 0.6);
+	stroke-width: 0.9;
+	stroke-linecap: round;
+}
+.cropper .bar.cut {
+	stroke: rgba(255, 255, 255, 0.1);
+}
+.cropper .handle {
+	fill: hsl(var(--hue) 100% 92%);
+}
+/* A fingertip-sized grab area round each small handle */
+.cropper .grip {
+	fill: transparent;
+	pointer-events: auto;
+	cursor: grab;
+	touch-action: none;
+}
+.editing-controls {
+	z-index: 1;
+	align-self: center;
+	translate: 0 calc(min(31vmin, 170px) + 5rem);
+	display: flex;
+	align-items: center;
+	gap: 0.8rem;
+	margin: 0;
+	font: 700 0.9rem OpenDyslexic, sans-serif;
+	letter-spacing: 0.04em;
+}
+.kept-length {
+	min-width: 3.5em;
+	color: hsl(var(--hue) 70% 82%);
+}
+.editing-controls button {
+	padding: 0.45rem 0.9rem;
+	border: none;
+	border-radius: 999px;
+	background: #2c2323;
+	color: #e8dcd8;
+	font: inherit;
+	letter-spacing: inherit;
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}

@@ -15,6 +15,12 @@ if (openedToInstall) {
 	})
 }
 
+// Opened by the home page's EDIT: the button can be cropped (see the crop arc below), and
+// opening it doesn't play the call
+const openedToEdit = new URLSearchParams(location.search).has("edit")
+// A crop saved for this button, applied as the sound loads, except while editing it
+const crop = openedToEdit ? null : cropOf(location.pathname)
+
 // Whether this button is installed, noted for the home page's wheel (see saved.js): it is when
 // it's just been installed, or opened as an app; it isn't when the browser offers to install it
 addEventListener("appinstalled", () => noteInstalled(location.pathname, true))
@@ -62,12 +68,14 @@ const TILT_DEGREES = 8
 // Number keys 1-8 play the call up a major scale, do to do, in semitones above as recorded
 const SCALE = [0, 2, 4, 5, 7, 9, 11, 12]
 // Key 0 cycles what the number keys play: the whole call, or just the part before or after the
-// sound's split. A sound recorded here has no such parts, so then there is only the whole of it
+// sound's split, which a crop moves, or crops away. A sound recorded here has no such parts, so
+// then there is only the whole of it
 const WHOLE = { from: 0, to: Infinity }
-let parts = thisSound.split ? [
+const split = thisSound.split - (crop?.from ?? 0)
+let parts = split > 0 && thisSound.split < (crop?.to ?? Infinity) ? [
 	WHOLE,
-	{ from: 0, to: thisSound.split },
-	{ from: thisSound.split, to: Infinity },
+	{ from: 0, to: split },
+	{ from: split, to: Infinity },
 ] : [WHOLE]
 // Phones, while the button is held, measured from how the phone was held at the press: raising
 // the top edge turns the knob up, this many knob degrees per degree raised; rolling it a
@@ -89,9 +97,13 @@ const limiter = new DynamicsCompressorNode(audio, { threshold: -3, knee: 0, rati
 const voices = audio.audioWorklet.addModule(new URL("voices.js", import.meta.url)).then(async () => {
 	const node = new AudioWorkletNode(audio, "voices", { outputChannelCount: [2] })
 	const call = await audio.decodeAudioData(await (await fetch("sound.mp3")).arrayBuffer())
-	const channels = Array.from({ length: call.numberOfChannels }, (_, channel) => call.getChannelData(channel))
+	const whole = Array.from({ length: call.numberOfChannels }, (_, channel) => call.getChannelData(channel))
+	// Cropped by keeping just the crop's stretch of the decoded sound, which costs next to nothing
+	const at = (seconds) => Math.round(seconds * call.sampleRate)
+	const channels = crop ? whole.map((samples) => samples.slice(at(crop.from), at(crop.to))) : whole
 	node.port.postMessage({ channels })
-	drawWaveform(channels[0])
+	if (openedToEdit) showCropper(whole[0], call.duration)
+	else drawWaveform(channels[0])
 	node.port.onmessage = ({ data }) => {
 		const shown = data.progress?.find((press) => press.id === ringPress)
 		if (shown && !scrubbing) showThrough(shown.through)
@@ -121,20 +133,26 @@ const WAVE_FROM = 51.5 // ring units (the ring itself is radius 49 in a 100-wide
 const WAVE_REACH = 11 // how far the loudest moment's spike reaches beyond WAVE_FROM
 const bars = []
 
-// One spike per slice of the recording, clockwise from 12 o'clock, as long as the slice is loud
-function drawWaveform(samples) {
-	const slice = Math.floor(samples.length / WAVE_BARS)
-	const loudness = Array.from({ length: WAVE_BARS }, (_, bar) => {
+// How loud each of so many equal slices of a sound is, the loudest being 1
+function loudnessOf(samples, slices) {
+	const slice = Math.floor(samples.length / slices)
+	const loudness = Array.from({ length: slices }, (_, index) => {
 		let energy = 0
-		for (let i = bar * slice; i < (bar + 1) * slice; i++) energy += samples[i] ** 2
+		for (let i = index * slice; i < (index + 1) * slice; i++) energy += samples[i] ** 2
 		return Math.sqrt(energy / slice)
 	})
 	const loudest = Math.max(...loudness)
+	return loudness.map((level) => level / loudest)
+}
+
+// One spike per slice of the recording, clockwise from 12 o'clock, as long as the slice is loud
+function drawWaveform(samples) {
+	const loudness = loudnessOf(samples, WAVE_BARS)
 	const head = ring.querySelector(".head")
 	loudness.forEach((level, bar) => {
 		// The ring's view is turned a quarter back, so angle 0 here sits at 12 o'clock
 		const angle = ((bar + 0.5) / WAVE_BARS) * 2 * Math.PI
-		const reach = WAVE_FROM + 1 + (level / loudest) * WAVE_REACH
+		const reach = WAVE_FROM + 1 + level * WAVE_REACH
 		const line = document.createElementNS("http://www.w3.org/2000/svg", "line")
 		line.setAttribute("class", "bar")
 		line.setAttribute("x1", 50 + Math.cos(angle) * WAVE_FROM)
@@ -388,7 +406,7 @@ button.addEventListener("pointerdown", (event) => {
 	button.classList.add("pressed")
 	const press = ++presses
 	pressOf.set(event.pointerId, press)
-	play(1, WHOLE, press)
+	play(1, openedToEdit ? cropping : WHOLE, press)
 	ringPress = press
 	ring.classList.remove("showing")
 	ring.style.setProperty("--through", 0)
@@ -576,11 +594,88 @@ if (typeof DeviceOrientationEvent?.requestPermission === "function") {
 	button.addEventListener("click", () => DeviceOrientationEvent.requestPermission(), { once: true })
 }
 
+// Opened to edit: an arc over the button, from 9 o'clock over the top to 3 o'clock, is the whole
+// sound, its loudness spiking out along it. A handle at either end crops it, sounding where
+// it's dragged to; pressing the button plays what's kept. SAVE keeps the crop for this button
+// (see saved.js), CANCEL doesn't, and either goes back to the home page
+const CROP_BARS = 90
+const CROP_HEARD = 0.35 // seconds heard beside a handle as it's dragged
+const SHORTEST_CROP = 0.1 // seconds
+const cropping = { from: 0, to: Infinity } // what's kept, in seconds
+
+function showCropper(samples, duration) {
+	Object.assign(cropping, cropOf(location.pathname) ?? { from: 0, to: duration })
+	document.body.classList.add("editing")
+	// Degrees clockwise from 12 o'clock, for a time in the sound, and a point on the ring's view there
+	const angleOf = (seconds) => -90 + (seconds / duration) * 180
+	const point = (radius, degrees) => [50 + Math.sin(degrees * Math.PI / 180) * radius, 50 - Math.cos(degrees * Math.PI / 180) * radius]
+	const arc = (from, to) => `M ${point(49, angleOf(from))} A 49 49 0 0 1 ${point(49, angleOf(to))}`
+	const spikes = loudnessOf(samples, CROP_BARS).map((level, index) => {
+		const degrees = -90 + ((index + 0.5) / CROP_BARS) * 180
+		return `<line class="bar" x1="${point(WAVE_FROM, degrees)[0]}" y1="${point(WAVE_FROM, degrees)[1]}" x2="${point(WAVE_FROM + 1 + level * WAVE_REACH, degrees)[0]}" y2="${point(WAVE_FROM + 1 + level * WAVE_REACH, degrees)[1]}"/>`
+	})
+	button.insertAdjacentHTML("beforeend", `<svg class="cropper" viewBox="0 0 100 100">
+		<path class="track" d="${arc(0, duration)}"/><path class="kept"/>${spikes.join("")}
+		<g class="handle" data-end="from"><circle r="1.8"/><circle class="grip" r="8"/></g>
+		<g class="handle" data-end="to"><circle r="1.8"/><circle class="grip" r="8"/></g>
+	</svg>`)
+	document.body.insertAdjacentHTML("beforeend", `<p class="editing-controls"><span class="kept-length"></span><button class="cancel">CANCEL</button><button class="save">SAVE</button></p>`)
+	const cropper = button.querySelector(".cropper")
+	const spikeLines = [...cropper.querySelectorAll(".bar")]
+
+	function showCrop() {
+		cropper.querySelector(".kept").setAttribute("d", arc(cropping.from, cropping.to))
+		for (const handle of cropper.querySelectorAll(".handle")) {
+			handle.setAttribute("transform", `translate(${point(49, angleOf(cropping[handle.dataset.end]))})`)
+		}
+		spikeLines.forEach((spike, index) => {
+			const seconds = ((index + 0.5) / CROP_BARS) * duration
+			spike.classList.toggle("cut", seconds < cropping.from || seconds > cropping.to)
+		})
+		document.querySelector(".kept-length").textContent = `${(cropping.to - cropping.from).toFixed(1)} S`
+	}
+	showCrop()
+
+	for (const handle of cropper.querySelectorAll(".handle")) {
+		let heardAt = 0
+		handle.addEventListener("pointerdown", (event) => {
+			// Grabbing a handle crops instead of pressing the button
+			event.stopPropagation()
+			event.preventDefault()
+			handle.setPointerCapture(event.pointerId)
+		})
+		handle.addEventListener("pointermove", (event) => {
+			if (!handle.hasPointerCapture(event.pointerId)) return
+			const { x, y } = centre()
+			// Round from 9 o'clock over the top to 3 o'clock; below either, the handle stays at that end
+			const degrees = Math.max(-90, Math.min(90, Math.atan2(event.clientX - x, y - event.clientY) * 180 / Math.PI))
+			const seconds = ((degrees + 90) / 180) * duration
+			if (handle.dataset.end === "from") cropping.from = Math.max(0, Math.min(seconds, cropping.to - SHORTEST_CROP))
+			else cropping.to = Math.min(duration, Math.max(seconds, cropping.from + SHORTEST_CROP))
+			showCrop()
+			// A moment of the sound beside the handle: after the start, or leading up to the end
+			if (performance.now() - heardAt < 120) return
+			heardAt = performance.now()
+			play(1, handle.dataset.end === "from"
+				? { from: cropping.from, to: cropping.from + CROP_HEARD }
+				: { from: Math.max(cropping.from, cropping.to - CROP_HEARD), to: cropping.to })
+		})
+	}
+
+	const home = new URL("./", import.meta.url)
+	document.querySelector(".editing-controls .cancel").addEventListener("click", () => location.replace(home))
+	document.querySelector(".editing-controls .save").addEventListener("click", () => {
+		const whole = cropping.from < 0.01 && cropping.to > duration - 0.01
+		noteCrop(location.pathname, whole ? null : { from: cropping.from, to: cropping.to })
+		location.replace(home)
+	})
+}
+
 // Opening the page, or coming back to it, plays the call once, so a shortcut to it on a home
 // screen or desktop is itself the button. Only while the browser allows sound without a touch:
 // a call it held back would otherwise go off late, alongside the touch that finally wakes it
 const WAKE_WAIT = 200 // ms the browser has to wake the audio before it counts as not allowed
-let away = !openedToInstall // opening the page counts as coming back
+let away = !openedToInstall && !openedToEdit // opening the page counts as coming back
 async function comeBack() {
 	if (!away || document.hidden) return
 	away = false

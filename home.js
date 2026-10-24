@@ -25,12 +25,12 @@ const PULL_TO_CHOOSE = 0.8
 async function show() {
 	sounds.replaceChildren()
 	for (const { folder, name, hue } of SOUNDS) {
-		offerWheel(showButton(`${folder}/`, name, hue), [installing(`${folder}/`)])
+		offerWheel(showButton(`${folder}/`, name, hue), [installing(`${folder}/`), editing(`${folder}/`)])
 	}
 	// Served by the service worker rather than the site (see sw.js)
 	for (const button of await savedButtons()) {
 		const href = `custom/${button.id}/`
-		offerWheel(showButton(href, button.name, button.hue), [installing(href), renaming(button), demoting(button)])
+		offerWheel(showButton(href, button.name, button.hue), [installing(href), editing(href), renaming(button), demoting(button)])
 	}
 	const recordings = await recentRecordings()
 	recent.hidden = recordings.length === 0
@@ -430,6 +430,15 @@ function shortened(words) {
 function installing(href) {
 	const installed = isInstalled(new URL(href, location.href).pathname)
 	return { label: installed ? "INSTALLED" : "INSTALL", unavailable: installed, picture: "M12 4v11M7 10l5 5 5-5M5 20h14", act: () => location.href = `${href}?install` }
+}
+
+// Cropping the button's sound, in the button itself (see button.js)
+function editing(href) {
+	return {
+		label: "EDIT",
+		picture: "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12",
+		act: () => location.href = `${href}?edit`,
+	}
 }
 
 function renaming(button) {

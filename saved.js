@@ -63,6 +63,20 @@ function noteInstalled(path, installed) {
 	localStorage.setItem("installed", JSON.stringify(installed ? [...others, path] : others))
 }
 
+// How each button's sound is cropped on this device, by its page's path: { from, to }, in
+// seconds. The sound itself is never changed, so a crop can always be widened again
+function cropOf(path) {
+	return JSON.parse(localStorage.getItem("crops") ?? "{}")[path] ?? null
+}
+
+// crop: null for the whole sound
+function noteCrop(path, crop) {
+	const crops = JSON.parse(localStorage.getItem("crops") ?? "{}")
+	if (crop) crops[path] = crop
+	else delete crops[path]
+	localStorage.setItem("crops", JSON.stringify(crops))
+}
+
 // sound: a WAV, like a recording's
 function addButton(sound, name, hue) {
 	const id = crypto.randomUUID().slice(0, 8)
