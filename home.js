@@ -317,7 +317,7 @@ async function nameByWords(id, samples, sampleRate) {
 		transcriber = new Worker("transcribe.js", { type: "module" })
 		transcriber.onmessage = ({ data }) => {
 			if ("downloading" in data) {
-				for (const waiting of hearing.keys()) showListening(waiting, `GETTING READY ${Math.round(data.downloading * 100)}%`)
+				for (const waiting of hearing.keys()) showTranscribing(waiting, `GETTING READY ${Math.round(data.downloading * 100)}%`)
 				return
 			}
 			hearing.get(data.id)(data)
@@ -329,7 +329,7 @@ async function nameByWords(id, samples, sampleRate) {
 			hearing.clear()
 		}
 	}
-	showListening(id, "LISTENING…")
+	showTranscribing(id, "TRANSCRIBING…")
 	const heard = await at16k(samples, sampleRate)
 		.then((speech) => new Promise((resolve) => {
 			hearing.set(id, resolve)
@@ -338,9 +338,9 @@ async function nameByWords(id, samples, sampleRate) {
 		.catch((error) => ({ error: error.message }))
 	if (heard.error) {
 		console.error("Couldn't name a recording by its words:", heard.error)
-		return showListening(id, `COULDN'T LISTEN: ${heard.error}`)
+		return showTranscribing(id, `COULDN'T TRANSCRIBE: ${heard.error}`)
 	}
-	listening.delete(id)
+	transcribing.delete(id)
 	const name = nameFrom(heard.text)
 	if (name) await nameRecording(id, name)
 	show()
@@ -348,18 +348,18 @@ async function nameByWords(id, samples, sampleRate) {
 
 // How naming a recording is going, shown after its time until it's named: kept here, not with the
 // recording, so it's gone on the next visit
-const listening = new Map() // recording id -> how it's going
+const transcribing = new Map() // recording id -> how transcribing it is going
 
-function showListening(id, status) {
-	listening.set(id, status)
+function showTranscribing(id, status) {
+	transcribing.set(id, status)
 	const row = recordingsList.querySelector(`[data-id="${id}"]`)
 	if (row) labelRow(row)
 }
 
 function labelRow(row) {
-	const status = listening.get(Number(row.dataset.id))
+	const status = transcribing.get(Number(row.dataset.id))
 	row.querySelector(".when").textContent = status ? `${row.dataset.label} · ${status}` : row.dataset.label
-	// A reason it couldn't listen is shown whole, however many lines it takes
+	// A reason it couldn't transcribe is shown whole, however many lines it takes
 	row.classList.toggle("trouble", status?.startsWith("COULDN'T") ?? false)
 }
 
