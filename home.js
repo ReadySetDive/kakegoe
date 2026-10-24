@@ -103,10 +103,10 @@ async function mp3(sound) {
 // A sound from a file or the web becomes a button straight away, once named and colored. It's
 // checked by decoding it, then copied in, so the button needs neither the file nor the web
 // again: as it came, or, when longer than LONGEST_SOUND, just its start, as a WAV
-async function addFrom(sound, source) {
+async function addFrom(sound, name) {
 	const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(await sound.arrayBuffer())
 	const copy = decoded.duration <= LONGEST_SOUND ? sound : wav(mono(decoded, LONGEST_SOUND * decoded.sampleRate), decoded.sampleRate)
-	startNaming("ADD", nameOf(source), Math.floor(Math.random() * 360), (name, hue) => addButton(copy, name, hue))
+	startNaming("ADD", shortened(name.toUpperCase()), Math.floor(Math.random() * 360), (name, hue) => addButton(copy, name, hue))
 }
 
 // A decoded sound's channels mixed into one, up to length samples long
@@ -127,7 +127,7 @@ document.querySelector(".from-file").addEventListener("click", () => fileInput.c
 fileInput.addEventListener("change", async () => {
 	const [file] = fileInput.files
 	fileInput.value = ""
-	await addFrom(file, file.name).catch(() => alert("That file isn't a sound this browser can play."))
+	await addFrom(file, nameOf(file.name)).catch(() => alert("That file isn't a sound this browser can play."))
 })
 
 // Sites that let other sites read them are fetched directly; the rest through the relay
@@ -155,22 +155,42 @@ fetching.addEventListener("close", () => {
 	for (const player of found.querySelectorAll("audio")) player.pause()
 })
 
-// An address is a sound to add, or a web page to look for sounds on
+// What's entered is an address, of a sound to add or a web page to look for sounds on, or else
+// words to search myinstants for
 fetchingForm.addEventListener("submit", async (event) => {
 	event.preventDefault()
-	const url = fetchingForm.elements.url.value
+	const entered = fetchingForm.elements.wanted.value.trim()
 	problem.hidden = true
 	found.replaceChildren()
-	const { response, at } = await fetchFromWeb(url).catch(() => ({}))
+	// An address typed without its https:// still has a dot in it, and no spaces
+	const wanted = /^[^\s:]+\.[^\s]+$/.test(entered) ? `https://${entered}` : entered
+	if (!/^https?:$/.test(URL.parse(wanted)?.protocol)) return search(entered)
+	const { response, at } = await fetchFromWeb(wanted).catch(() => ({}))
 	if (!response) return explain("Couldn't reach that address.")
 	if (!response.ok) return explain(response.status === 415 ? "That address is neither a web page nor a sound." : "Nothing to be found at that address.")
 	if (/^(text\/html|application\/xhtml)/.test(response.headers.get("content-type"))) return listSounds(await response.text(), at)
-	await addFromWeb(await response.blob(), at)
+	await addFromWeb(await response.blob(), nameOf(new URL(at).pathname))
 })
 
-async function addFromWeb(sound, at) {
+// Myinstants' search, read like any other page, but just its results, by their titles, not the
+// other sounds it shows alongside
+async function search(words) {
+	const { response, at } = await fetchFromWeb(`https://www.myinstants.com/en/search/?name=${encodeURIComponent(words)}`).catch(() => ({}))
+	// Myinstants answers a search that finds nothing as a page not found
+	if (response?.status === 404) return explain(`No sounds found for "${words}".`)
+	if (!response?.ok) return explain("Couldn't reach myinstants to search it.")
+	const page = new DOMParser().parseFromString(await response.text(), "text/html")
+	const results = [...page.querySelectorAll("#instants_container .instant")].map((instant) => ({
+		address: new URL(instant.querySelector("button[onclick^=play]").getAttribute("onclick").match(/play\('([^']+)'/)[1], at).href,
+		name: instant.querySelector(".instant-link").textContent.trim(),
+	}))
+	if (!results.length) return explain(`No sounds found for "${words}".`)
+	found.replaceChildren(...results.slice(0, LONGEST_FOUND).map(({ address, name }) => foundRow(address, name)))
+}
+
+async function addFromWeb(sound, name) {
 	fetching.close()
-	await addFrom(sound, new URL(at).pathname).catch(() => {
+	await addFrom(sound, name).catch(() => {
 		fetching.showModal()
 		explain("That isn't a sound this browser can play.")
 	})
@@ -188,7 +208,7 @@ async function listSounds(page, at) {
 		}
 	}
 	if (!sounds.length) return explain("No sounds found on that page.")
-	found.replaceChildren(...sounds.slice(0, LONGEST_FOUND).map(foundRow))
+	found.replaceChildren(...sounds.slice(0, LONGEST_FOUND).map((address) => foundRow(address, nameOf(new URL(address).pathname))))
 }
 
 function soundsIn(text, at) {
@@ -199,33 +219,32 @@ function soundsIn(text, at) {
 	return [...new Set(addresses)]
 }
 
-// A sound found on a page: played straight from the page's site, which needs no permission, and
-// only fetched, through the relay if need be, when added. Longer than LONGEST_SOUND, it can be
-// played but not added
-function foundRow(address) {
+// A sound found on a page or by a search: played straight from its site, which needs no
+// permission, and only fetched, through the relay if need be, when added. Longer than
+// LONGEST_SOUND, it can be played but not added
+function foundRow(address, name) {
 	const row = document.querySelector("template.found-sound").content.firstElementChild.cloneNode(true)
 	const player = row.querySelector("audio")
 	const add = row.querySelector(".add")
 	player.src = address
-	row.querySelector(".name").textContent = nameOf(new URL(address).pathname)
+	row.querySelector(".name").textContent = name
 	player.addEventListener("loadedmetadata", () => {
 		row.querySelector(".length").textContent = `${Math.floor(player.duration / 60)}:${String(Math.round(player.duration % 60)).padStart(2, "0")}`
 		add.classList.toggle("too-long", player.duration > LONGEST_SOUND)
 	})
+	// Playing, its play button pauses it; paused, it carries on, or starts over once finished
 	row.querySelector(".play").addEventListener("click", () => {
 		const playing = !player.paused
 		for (const other of found.querySelectorAll("audio")) other.pause()
-		if (!playing) {
-			player.currentTime = 0
-			player.play()
-		}
+		if (!playing) player.play()
 	})
+	for (const change of ["play", "pause", "ended"]) player.addEventListener(change, () => row.classList.toggle("playing", !player.paused))
 	add.addEventListener("click", async () => {
 		if (add.classList.contains("too-long")) return explain(`That one's too long: sounds can be ${LONGEST_SOUND / 60} minutes at most.`)
 		problem.hidden = true
 		const { response, at } = await fetchFromWeb(address).catch(() => ({}))
 		if (!response?.ok) return explain("Couldn't fetch that sound.")
-		await addFromWeb(await response.blob(), at)
+		await addFromWeb(await response.blob(), name)
 	})
 	return row
 }
@@ -394,12 +413,17 @@ function nameFrom(text) {
 	const said = text.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/\s+/g, " ").trim().toUpperCase()
 	// Counting comes out as figures, "1, 2, 2", which name a recording as well as words do
 	if (!/[\p{L}\p{N}]/u.test(said) || NOT_SPEECH.includes(said)) return null
+	return shortened(said)
+}
+
+// As many whole words as fit in the naming dialog, or, a single long word, as much of it as fits
+function shortened(words) {
 	let name = ""
-	for (const word of said.split(" ")) {
+	for (const word of words.split(" ")) {
 		if (`${name} ${word}`.trim().length > LONGEST_NAME) break
 		name = `${name} ${word}`.trim()
 	}
-	return name || said.slice(0, LONGEST_NAME)
+	return name || words.slice(0, LONGEST_NAME)
 }
 
 // The wheel's options, each with the picture in its slice (24 px square, drawn in strokes)

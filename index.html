@@ -195,7 +195,7 @@
 			width: min(28rem, 88vw);
 			box-sizing: border-box;
 		}
-		.fetching input[name="url"] {
+		.fetching input[name="wanted"] {
 			width: 100%;
 			box-sizing: border-box;
 		}
@@ -226,6 +226,9 @@
 			overflow: hidden;
 			white-space: nowrap;
 			text-overflow: ellipsis;
+		}
+		.found li:not(.playing) .pause-picture, .found .playing .play-picture {
+			display: none;
 		}
 		.found .length {
 			color: #8a7d7a;
@@ -446,7 +449,7 @@
 	</template>
 	<template class="found-sound">
 		<li>
-			<button type="button" class="icon play" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg></button>
+			<button type="button" class="icon play" aria-label="Play or pause"><svg class="play-picture" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg><svg class="pause-picture" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg></button>
 			<span class="name"></span>
 			<span class="length"></span>
 			<button type="button" class="add">ADD</button>
@@ -459,7 +462,7 @@
 		<span class="divider"></span>
 		<button class="record" aria-label="Hold to record"><svg class="taken" viewBox="-100 -100 200 200"><path class="track" d="M -100 0 A 100 100 0 0 1 100 0" pathLength="1"/><path class="used" d="M -100 0 A 100 100 0 0 1 100 0" pathLength="1"/></svg></button>
 		<span class="divider"></span>
-		<button class="from-web">ADD FROM URL</button>
+		<button class="from-web">ADD FROM WEB</button>
 		<input type="file" accept="audio/*" hidden>
 	</nav>
 	<div class="wheel" popover="manual"></div>
@@ -474,7 +477,7 @@
 	</dialog>
 	<dialog class="fetching">
 		<form>
-			<input name="url" type="url" placeholder="A sound, or a page with sounds on it" required autocomplete="off">
+			<input name="wanted" placeholder="Words to search for, or an address" required autocomplete="off">
 			<p class="problem" hidden></p>
 			<ol class="found"></ol>
 			<div class="choices"><button type="button" class="cancel">CANCEL</button><button>FETCH</button></div>
