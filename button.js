@@ -414,7 +414,12 @@ for (const release of ["pointerup", "pointercancel"]) {
 			rollSpeed = 1
 			restingRoll = null
 			steer()
-			turnKnob(wheelTurned ? Math.round(hand / 360) * 360 : hand, "home")
+			// Unscrewing takes four turns in one go: let go short of that and the button screws back
+			// down. Whole turns drop off the knob unseen and unheard, a turn round being the same pitch
+			const wholeTurns = hand - around(hand)
+			hand -= wholeTurns
+			knob.shown -= wholeTurns
+			turnKnob(wheelTurned ? 0 : hand, "home")
 			wheelTurned = false
 		}
 		if (event.pointerId === bending?.pointerId) {
