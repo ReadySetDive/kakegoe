@@ -38,6 +38,38 @@
 			background: radial-gradient(circle at 38% 32%, #ff6a5c, #d81e14 45%, #8f0d08 100%);
 			box-shadow: 0 1.6vmin 0 #5a0603, 0 3vmin 6vmin rgba(0, 0, 0, 0.6), inset 0 -1vmin 3vmin rgba(0, 0, 0, 0.35);
 			transition: transform 60ms, box-shadow 60ms;
+			position: relative;
+		}
+		/* The knob's marker: a dot near the rim, turned by rotating this full-size layer */
+		.dial {
+			position: absolute;
+			inset: 0;
+			pointer-events: none;
+			transform: rotate(var(--turn, 0deg));
+		}
+		.dot {
+			position: absolute;
+			top: 50%;
+			right: 6%;
+			width: 9%;
+			aspect-ratio: 1;
+			translate: 0 -50%;
+			border-radius: 50%;
+			background: #ffe6dc;
+			box-shadow: 0 0 0 0.4vmin rgba(90, 6, 3, 0.6), 0 0 2vmin rgba(255, 200, 180, 0.5);
+			pointer-events: auto;
+			cursor: grab;
+			touch-action: none;
+		}
+		/* A fingertip-sized grab area around the small dot */
+		.dot::before {
+			content: "";
+			position: absolute;
+			inset: -120%;
+			border-radius: 50%;
+		}
+		.dot:active {
+			cursor: grabbing;
 		}
 		button.pressed {
 			transform: translateY(1.2vmin) scale(0.97);
@@ -46,13 +78,19 @@
 	</style>
 </head>
 <body>
-	<button aria-label="Yoooo! (play the call)"></button>
+	<button aria-label="Yoooo! (play the call)"><span class="dial"><span class="dot" title="Drag to change pitch; double-click to reset"></span></span></button>
 	<script type="module">
 		// Lets iPhones play it even with the ring/silent switch on silent
 		if (navigator.audioSession) navigator.audioSession.type = "playback"
 
 		const button = document.querySelector("button")
+		const dial = document.querySelector(".dial")
+		const dot = document.querySelector(".dot")
 		const audio = new AudioContext()
+		const playing = new Set()
+		// The knob turns 150 degrees either way from 3 o'clock: up an octave at the top, down one at the bottom
+		const KNOB_LIMIT = 150
+		let knob = 0 // degrees, positive turning up (anticlockwise)
 		// Decoded once up front, so each press starts instantly and presses overlap freely
 		const call = fetch("yo.mp3").then((response) => response.arrayBuffer()).then((bytes) => audio.decodeAudioData(bytes))
 
@@ -61,9 +99,44 @@
 			if (audio.state !== "running") audio.resume()
 			const voice = audio.createBufferSource()
 			voice.buffer = await call
+			voice.playbackRate.value = pitch()
 			voice.connect(audio.destination)
 			voice.start()
+			playing.add(voice)
+			voice.onended = () => playing.delete(voice)
 		}
+
+		function pitch() {
+			return 2 ** (knob / KNOB_LIMIT)
+		}
+
+		function turnKnob(degrees) {
+			knob = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, degrees))
+			dial.style.setProperty("--turn", `${-knob}deg`)
+			// Calls already sounding bend with the knob too
+			for (const voice of playing) voice.playbackRate.setTargetAtTime(pitch(), audio.currentTime, 0.01)
+			try { localStorage.setItem("knob", knob) } catch {}
+		}
+
+		try { turnKnob(Number(localStorage.getItem("knob")) || 0) } catch {}
+
+		dot.addEventListener("pointerdown", (event) => {
+			// Grabbing the dot turns the knob instead of pressing the button
+			event.stopPropagation()
+			event.preventDefault()
+			dot.setPointerCapture(event.pointerId)
+		})
+		dot.addEventListener("pointermove", (event) => {
+			if (!dot.hasPointerCapture(event.pointerId)) return
+			const centre = button.getBoundingClientRect()
+			const x = event.clientX - (centre.left + centre.width / 2)
+			const y = event.clientY - (centre.top + centre.height / 2)
+			turnKnob(Math.atan2(-y, x) * 180 / Math.PI)
+		})
+		dot.addEventListener("dblclick", (event) => {
+			event.stopPropagation()
+			turnKnob(0)
+		})
 
 		// On press rather than click: the sound starts the instant a finger lands
 		button.addEventListener("pointerdown", (event) => {
