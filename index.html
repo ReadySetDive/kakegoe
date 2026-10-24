@@ -9,6 +9,9 @@
 	<meta name="apple-mobile-web-app-capable" content="yes">
 	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 	<meta name="apple-mobile-web-app-title" content="Kakegoe">
+	<!-- The manifest scopes this app to index.html alone, not the whole folder, or phones would count
+	     every other sound's page, in the folders below, as part of this app and refuse to install it.
+	     Its id keeps it the app already on phones from when it started at the folder -->
 	<link rel="manifest" href="manifest.webmanifest">
 	<link rel="icon" href="icon-192.png">
 	<link rel="apple-touch-icon" href="apple-touch-icon.png">
