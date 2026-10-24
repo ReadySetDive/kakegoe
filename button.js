@@ -570,23 +570,25 @@ if (typeof DeviceOrientationEvent?.requestPermission === "function") {
 	button.addEventListener("click", () => DeviceOrientationEvent.requestPermission(), { once: true })
 }
 
-// Launching the button plays the call once, so a shortcut to it on a home screen or desktop is
-// itself the button; switching back to it from another app or tab doesn't. Only while the
-// browser allows sound without a touch: a call it held back would otherwise go off late,
-// alongside the touch that finally wakes it
+// Opening the page, or coming back to it, plays the call once, so a shortcut to it on a home
+// screen or desktop is itself the button. Only while the browser allows sound without a touch:
+// a call it held back would otherwise go off late, alongside the touch that finally wakes it
 const WAKE_WAIT = 200 // ms the browser has to wake the audio before it counts as not allowed
-async function launched() {
+let away = !openedToInstall // opening the page counts as coming back
+async function comeBack() {
+	if (!away || document.hidden) return
+	away = false
+	// A press that brought the page into focus has played already
+	if (held.size) return
 	const awake = await Promise.race([
 		audio.resume().then(() => true),
 		new Promise((resolve) => setTimeout(resolve, WAKE_WAIT, false)),
 	])
 	if (awake) play()
 }
-if (!openedToInstall) launched()
-// Launched again from its icon while already open, an installed button is brought forward rather
-// than opened anew (launch_handler in its manifest), and told so here, where browsers support it.
-// They announce its first opening here too, which has already played
-const FIRST_OPENING = 2000 // ms
-window.launchQueue?.setConsumer(() => performance.now() > FIRST_OPENING && launched())
+addEventListener("focus", comeBack)
+addEventListener("blur", () => away = true)
+document.addEventListener("visibilitychange", () => document.hidden ? away = true : comeBack())
+comeBack()
 
 navigator.serviceWorker?.register(new URL("sw.js", import.meta.url))
