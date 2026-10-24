@@ -129,10 +129,14 @@
 			{ from: 0, to: 1.17 },
 			{ from: 1.17, to: Infinity },
 		]
-		// Phones: raising the top edge turns the knob up, this many knob degrees per degree raised
-		// from how it was held when the app opened. Rolling it onto its side slows the call to a
-		// standstill, and on over to face down plays it backwards
-		const RAISE_TO_KNOB = 3
+		// Phones: while the button is held, raising the top edge turns the knob up, this many knob
+		// degrees per degree raised from how it was held at the press. Rolling it onto its side slows
+		// the call to a standstill, and on over to face down plays it backwards
+		const RAISE_TO_KNOB = 1.2
+		// Small raises count for a little less (70% at first), rising smoothly to full weight by this
+		// many degrees, so a steady hand doesn't wobble the pitch, yet there's no dead spot to notice
+		const RAISE_WELL = 15
+		const RAISE_WELL_FLOOR = 0.7
 		const SENSOR_SMOOTHING = 0.25 // of each new reading taken, so hand tremor doesn't wobble the sound
 
 		const audio = new AudioContext()
@@ -203,10 +207,17 @@
 		}
 
 		function aimKnob() {
-			const turned = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, hand + raise))
-			// Eases to zero near the centre, so dwelling close to normal settles there, while
-			// matching the hand exactly at the detent's edge so there is never a jump
-			knob.target = Math.abs(turned) < DETENT ? turned * (turned / DETENT) ** 2 : turned
+			// The hand's turn eases to zero near the centre, so dwelling close to normal settles there,
+			// while matching the hand exactly at the detent's edge so there is never a jump. Raising
+			// the phone has its own gentler well (see eased) and goes on top
+			const turned = Math.abs(hand) < DETENT ? hand * (hand / DETENT) ** 2 : hand
+			knob.target = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, turned + raise))
+		}
+
+		function eased(tilt) {
+			const progress = Math.min(Math.abs(tilt) / RAISE_WELL, 1)
+			const smooth = progress * progress * (3 - 2 * progress)
+			return tilt * (RAISE_WELL_FLOOR + (1 - RAISE_WELL_FLOOR) * smooth)
 		}
 
 		// The pitch follows the drawn knob, so its springy settle can be heard as well as seen
@@ -271,10 +282,11 @@
 				held.delete(event.pointerId)
 				if (held.size === 0) {
 					button.classList.remove("pressed")
-					if (wheelTurned) {
-						wheelTurned = false
-						turnKnob(0, "home")
-					}
+					// Pitch from the wheel or from raising the phone lasts only while held: it swings home
+					raise = 0
+					restingRaise = null
+					turnKnob(wheelTurned ? 0 : hand, "home")
+					wheelTurned = false
 				}
 				if (event.pointerId === bending?.pointerId) {
 					// Let go and the button springs back flat, the call back to normal speed and volume
@@ -335,7 +347,7 @@
 
 		// Which way is up, in the phone's own axes (x to its right, y to its top, z out of the screen)
 		let up = null
-		let restingRaise = null // the top edge's angle above level when the app opened
+		let restingRaise = null // the top edge's angle above level when the button was pressed
 		addEventListener("deviceorientation", ({ beta, gamma }) => {
 			if (beta === null) return // a computer without motion sensors
 			const tipped = beta * Math.PI / 180
@@ -351,9 +363,10 @@
 				rollSpeed = roll > 0.97 ? 1 : roll // a little lean counts as level
 				glide("speed", dragSpeed * rollSpeed)
 			}
+			if (!held.size) return
 			const raised = Math.asin(Math.max(-1, Math.min(1, up.y))) * 180 / Math.PI
 			restingRaise ??= raised
-			raise = (raised - restingRaise) * RAISE_TO_KNOB
+			raise = eased(raised - restingRaise) * RAISE_TO_KNOB
 			aimKnob()
 			// A springing knob carries on to the new aim; a resting one follows the phone directly
 			if (!knob.moving) {
