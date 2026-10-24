@@ -233,7 +233,9 @@
 		button.addEventListener("contextmenu", (event) => event.preventDefault())
 
 		let unpress
-		button.addEventListener("wheel", (event) => {
+		// Listened for on the whole page: wheel events go to whatever is under the cursor, and a held
+		// button keeps tracking drags that wander off it, so the wheel must too
+		addEventListener("wheel", (event) => {
 			event.preventDefault()
 			// While the button is held down, the wheel turns the pitch knob instead of pressing
 			if (held.size) {
@@ -242,8 +244,9 @@
 				wheelTurned = true
 				return
 			}
-			// Otherwise every notch of a mouse wheel is a press. A notch arrives as one big jump (a
-			// line, or about 100 px); touchpads send streams of small deltas, which are ignored
+			// Otherwise every notch of a mouse wheel over the button is a press. A notch arrives as one
+			// big jump (a line, or about 100 px); touchpads send streams of small deltas, which are ignored
+			if (!button.contains(event.target)) return
 			if (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL && Math.abs(event.deltaY) < 40) return
 			play()
 			button.classList.add("pressed")
