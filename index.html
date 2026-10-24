@@ -78,6 +78,28 @@
 			touch-action: none;
 		}
 		/* A fingertip-sized grab area around the small dot */
+		/* How far through the recording a held press has got: a faint ring just outside the button,
+		   filling clockwise from the top, which fades in only once a press has been held a moment */
+		.ring {
+			position: absolute;
+			inset: -6%;
+			rotate: -90deg;
+			overflow: visible;
+			pointer-events: none;
+			opacity: 0;
+			transition: opacity 0.35s;
+		}
+		.ring.showing {
+			opacity: 1;
+		}
+		.ring circle {
+			fill: none;
+			stroke: rgba(255, 215, 205, 0.3);
+			stroke-width: 1.2;
+			stroke-linecap: round;
+			stroke-dasharray: 1;
+			stroke-dashoffset: calc(1 - var(--through, 0));
+		}
 		.dot::before {
 			content: "";
 			position: absolute;
@@ -90,7 +112,7 @@
 	</style>
 </head>
 <body>
-	<button aria-label="Yoooo! (play the call)"><span class="dial"><span class="dot" title="Drag to change pitch"></span></span></button>
+	<button aria-label="Yoooo! (play the call)"><span class="dial"><span class="dot" title="Drag to change pitch"></span></span><svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="49" pathLength="1"/></svg></button>
 	<script type="module">
 		// Lets iPhones play it even with the ring/silent switch on silent
 		if (navigator.audioSession) navigator.audioSession.type = "playback"
@@ -98,6 +120,7 @@
 		const button = document.querySelector("button")
 		const dial = document.querySelector(".dial")
 		const dot = document.querySelector(".dot")
+		const ring = document.querySelector(".ring")
 
 		// The knob turns 150 degrees either way from 3 o'clock: up an octave at the top, down one at the bottom
 		const KNOB_LIMIT = 150
@@ -150,6 +173,10 @@
 			const call = await audio.decodeAudioData(await (await fetch("yo.mp3")).arrayBuffer())
 			const channels = Array.from({ length: call.numberOfChannels }, (_, channel) => call.getChannelData(channel))
 			node.port.postMessage({ channels })
+			node.port.onmessage = ({ data }) => {
+				const shown = data.progress.find((press) => press.id === ringPress)
+				if (shown) ring.style.setProperty("--through", Math.max(0, Math.min(1, shown.through)))
+			}
 			node.connect(volume).connect(limiter).connect(audio.destination)
 			return node
 		})
@@ -161,13 +188,26 @@
 		let bending = null // the pointer holding the middle of the button, and where it pressed
 		let wheelTurned = false // the wheel turned the knob during this hold, so it springs back after
 		const held = new Set() // pointers currently holding the button or the knob
+		// Each press of the button plays its own copy of the call, which that press steers while held
+		const pressOf = new Map() // pointer -> the press it is holding
+		let presses = 0
+		let ringPress = null // the press whose progress the ring shows
+		let ringDelay
+		const RING_DELAY = 400 // ms a press must be held before its progress ring fades in
 
-		// note: this call's own pitch, on top of the knob's (1 is as recorded); part: which stretch of it
-		async function play(note = 1, part = PARTS[0]) {
+		// note: this call's own pitch, on top of the knob's (1 is as recorded); part: which stretch of
+		// it; press: the held press that steers it, if any
+		async function play(note = 1, part = PARTS[0], press) {
 			// Browsers only allow sound after a touch, so wake the audio on the press itself
 			if (audio.state !== "running") audio.resume()
 			const node = await voices
-			node.port.postMessage({ note, ...part })
+			node.port.postMessage({ note, ...part, id: press })
+		}
+
+		// Speed bends from dragging and rolling the phone steer only the copies still held
+		async function steer() {
+			const node = await voices
+			node.port.postMessage({ heldSpeed: dragSpeed * rollSpeed })
 		}
 
 		async function glide(parameter, value, seconds = 0.02) {
@@ -236,7 +276,7 @@
 			button.style.setProperty("--tilt-y", `${across * TILT_DEGREES}deg`)
 			// Speed along a curve, so fine changes near normal are easy: 0.2x fully left, 3.5x fully right
 			dragSpeed = across < 0 ? 0.2 ** -across : 3.5 ** across
-			glide("speed", dragSpeed * rollSpeed)
+			steer()
 			const lift = limit(-down / (bending.radius * LOUDNESS_REACH))
 			const loudness = lift > 0 ? 1 + (LOUDEST - 1) * lift ** LOUDNESS_CURVE : 1 - 0.8 * lowering // down to 0.2x
 			volume.gain.setTargetAtTime(loudness, audio.currentTime, 0.02)
@@ -266,7 +306,14 @@
 			button.setPointerCapture(event.pointerId)
 			held.add(event.pointerId)
 			button.classList.add("pressed")
-			play()
+			const press = ++presses
+			pressOf.set(event.pointerId, press)
+			play(1, PARTS[0], press)
+			ringPress = press
+			ring.classList.remove("showing")
+			ring.style.setProperty("--through", 0)
+			clearTimeout(ringDelay)
+			ringDelay = setTimeout(() => ring.classList.add("showing"), RING_DELAY)
 			const { x, y, radius } = centre()
 			if (!bending && Math.hypot(event.clientX - x, event.clientY - y) < radius * BEND_ZONE) {
 				bending = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, reach: radius * BEND_REACH, radius }
@@ -280,6 +327,15 @@
 		for (const release of ["pointerup", "pointercancel"]) {
 			button.addEventListener(release, (event) => {
 				held.delete(event.pointerId)
+				const press = pressOf.get(event.pointerId)
+				if (press) {
+					pressOf.delete(event.pointerId)
+					voices.then((node) => node.port.postMessage({ release: press }))
+					if (press === ringPress) {
+						clearTimeout(ringDelay)
+						ring.classList.remove("showing")
+					}
+				}
 				if (held.size === 0) {
 					button.classList.remove("pressed")
 					// Pitch from the wheel or from raising the phone lasts only while held: it swings home
@@ -287,7 +343,7 @@
 					restingRaise = null
 					rollSpeed = 1
 					restingRoll = null
-					glide("speed", dragSpeed)
+					steer()
 					turnKnob(wheelTurned ? 0 : hand, "home")
 					wheelTurned = false
 				}
@@ -368,7 +424,7 @@
 				restingRoll ??= roll
 				const speed = Math.cos(roll - restingRoll)
 				rollSpeed = speed > 0.97 ? 1 : speed // a little lean counts as level
-				glide("speed", dragSpeed * rollSpeed)
+				steer()
 			}
 			const raised = Math.asin(Math.max(-1, Math.min(1, up.y))) * 180 / Math.PI
 			restingRaise ??= raised
