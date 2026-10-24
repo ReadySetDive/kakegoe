@@ -55,8 +55,11 @@
 			aspect-ratio: 1;
 			translate: 0 -50%;
 			border-radius: 50%;
-			background: #ffe6dc;
-			box-shadow: 0 0 0 0.4vmin rgba(90, 6, 3, 0.6), 0 0 2vmin rgba(255, 200, 180, 0.5);
+			/* A shallow dimple pressed into the button: shaded at its top, catching light at its
+			   bottom. Counter-rotated so that light keeps coming from above as the knob turns */
+			rotate: calc(var(--turn, 0deg) * -1);
+			background: radial-gradient(circle at 50% 65%, #c71a10, #a8130b);
+			box-shadow: inset 0 0.5vmin 0.8vmin rgba(60, 0, 0, 0.45), inset 0 -0.3vmin 0.4vmin rgba(255, 120, 100, 0.25);
 			pointer-events: auto;
 			cursor: grab;
 			touch-action: none;
@@ -110,8 +113,14 @@
 			return 2 ** (knob / KNOB_LIMIT)
 		}
 
+		// Within this many degrees of 3 o'clock the knob is drawn softly back to normal pitch
+		const DETENT = 12
+
 		function turnKnob(degrees) {
 			knob = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, degrees))
+			// Eases to zero near the centre, so dwelling close to normal settles there, while
+			// matching the hand exactly at the detent's edge so there is never a jump
+			if (Math.abs(knob) < DETENT) knob = knob * (knob / DETENT) ** 2
 			dial.style.setProperty("--turn", `${-knob}deg`)
 			// Calls already sounding bend with the knob too
 			for (const voice of playing) voice.playbackRate.setTargetAtTime(pitch(), audio.currentTime, 0.01)
