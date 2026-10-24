@@ -242,32 +242,17 @@
 		const TILT_DEGREES = 8
 		// Number keys 1-8 play the call up a major scale, do to do, in semitones above as recorded
 		const SCALE = [0, 2, 4, 5, 7, 9, 11, 12]
-		// Key 0 cycles what the number keys play. For the samurai call: the whole call, just the
-		// shouted "yo", or just its ethereal tail (the shout ends and the steady tone takes over 1.17 s
-		// in, measured). Other sounds have no such parts, so for them there is only the whole
+		// Key 0 cycles what the number keys play: the whole call, just the shouted "yo", or just its
+		// ethereal tail. The shout ends and the steady tone takes over 1.17 s in (measured). A sound
+		// you record yourself has no such parts, so then there is only the whole of it
 		const WHOLE = { from: 0, to: Infinity }
-		// The sounds the button can hold, in the order four clockwise turns step through them (see
-		// sounds/CREDITS.md). A recording you make joins the rotation, after the sound it replaced
-		const LIBRARY = [
-			{ file: "yo.mp3", parts: [WHOLE, { from: 0, to: 1.17 }, { from: 1.17, to: Infinity }] },
-			{ file: "sounds/fight.mp3" },
-			{ file: "sounds/round-1.mp3" },
-			{ file: "sounds/final-round.mp3" },
-			{ file: "sounds/prepare-yourself.mp3" },
-			{ file: "sounds/combo-breaker.mp3" },
-			{ file: "sounds/flawless-victory.mp3" },
-			{ file: "sounds/you-win.mp3" },
-			{ file: "sounds/you-lose.mp3" },
-			{ file: "sounds/game-over.mp3" },
-			{ file: "sounds/punch.mp3" },
-			{ file: "sounds/bell.mp3" },
+		let parts = [
+			WHOLE,
+			{ from: 0, to: 1.17 },
+			{ from: 1.17, to: Infinity },
 		]
-		let slot = 0
-		let parts = LIBRARY[0].parts
-		// Four anticlockwise turns of the knob unscrew the button, revealing a record button beneath;
-		// four clockwise turns load the next sound and play it
+		// Four anticlockwise turns of the knob unscrew the button, revealing a record button beneath
 		const TURNS_TO_LIFT = 4
-		const TURNS_TO_SWAP = 4
 		const RECORD_LIMIT = 5 // seconds
 		// Phones, while the button is held, measured from how the phone was held at the press: raising
 		// the top edge turns the knob up, this many knob degrees per degree raised; rolling it a
@@ -287,6 +272,10 @@
 		// independently, live, on every call already sounding
 		const voices = audio.audioWorklet.addModule("voices.js").then(async () => {
 			const node = new AudioWorkletNode(audio, "voices", { outputChannelCount: [2] })
+			const call = await audio.decodeAudioData(await (await fetch("yo.mp3")).arrayBuffer())
+			const channels = Array.from({ length: call.numberOfChannels }, (_, channel) => call.getChannelData(channel))
+			node.port.postMessage({ channels })
+			drawWaveform(channels[0])
 			node.port.onmessage = ({ data }) => {
 				const shown = data.progress?.find((press) => press.id === ringPress)
 				if (shown && !scrubbing) showThrough(shown.through)
@@ -466,29 +455,6 @@
 			button.style.setProperty("--rise", `${loose * 1.5}vmin`)
 			button.style.setProperty("--swell", 1 + loose * 0.04)
 			if (turns >= TURNS_TO_LIFT && !document.body.classList.contains("lifted")) liftOff()
-			if (turns <= -TURNS_TO_SWAP) swap()
-		}
-
-		// The next sound in the rotation, played so you hear what is loaded. The knob carries on
-		// from where it is: four whole turns change nothing about where it points
-		async function swap() {
-			hand += TURNS_TO_SWAP * 360
-			knob.shown += TURNS_TO_SWAP * 360
-			aimKnob()
-			await choose((slot + 1) % LIBRARY.length)
-			play()
-			button.classList.add("pressed")
-			setTimeout(() => held.size || button.classList.remove("pressed"), 90)
-		}
-
-		async function choose(index) {
-			slot = index
-			const sound = LIBRARY[index]
-			if (!sound.channels) {
-				const decoded = await audio.decodeAudioData(await (await fetch(sound.file)).arrayBuffer())
-				sound.channels = Array.from({ length: decoded.numberOfChannels }, (_, channel) => decoded.getChannelData(channel))
-			}
-			await useSound(sound.channels, sound.parts ?? [WHOLE])
 		}
 
 		let microphone = null
@@ -553,10 +519,7 @@
 			for (const track of microphone.getTracks()) track.stop()
 			microphone = null
 			const sound = trimmed(blocks)
-			if (sound) {
-				LIBRARY.splice(slot + 1, 0, { channels: [sound] })
-				choose(slot + 1)
-			}
+			if (sound) useSound(sound)
 			slotBack()
 		}
 
@@ -577,13 +540,13 @@
 			return samples.slice(begins, ends).map((sample) => (sample / loudest) * 0.9)
 		}
 
-		async function useSound(channels, soundParts) {
+		async function useSound(samples) {
 			const node = await voices
-			node.port.postMessage({ channels })
+			node.port.postMessage({ channels: [samples] })
 			for (const bar of bars) bar.remove()
 			bars.length = 0
-			drawWaveform(channels[0])
-			parts = soundParts
+			drawWaveform(samples)
+			parts = [WHOLE]
 			keyPart = 0
 		}
 
@@ -784,7 +747,6 @@
 			button.addEventListener("click", () => DeviceOrientationEvent.requestPermission(), { once: true })
 		}
 
-		choose(0)
 		navigator.serviceWorker?.register("sw.js")
 	</script>
 </body>
