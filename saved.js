@@ -3,7 +3,7 @@
 const RECENT_LIMIT = 10
 // Recordings stop, and sounds added from files or the web are cut off, at this length. Much
 // longer, and phones run short of memory, since a button holds its whole sound decoded
-const LONGEST_SOUND = 180 // seconds
+const LONGEST_SOUND = 300 // seconds
 
 function saved(storeName, mode, work) {
 	return new Promise((resolve, reject) => {

@@ -55,7 +55,9 @@ function showButton(href, name, hue) {
 function recordingRow(recording) {
 	const row = document.querySelector("template.recording").content.firstElementChild.cloneNode(true)
 	const when = new Date(recording.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })
-	row.querySelector(".when").textContent = recording.name ? `${recording.name} · ${when}` : when
+	row.dataset.id = recording.id
+	row.dataset.label = recording.name ? `${recording.name} · ${when}` : when
+	labelRow(row)
 	row.querySelector(".play").addEventListener("click", () => new Audio(URL.createObjectURL(recording.sound)).play())
 	row.querySelector(".promote").addEventListener("click", () => {
 		startNaming("PROMOTE", recording.name ?? "", Math.floor(Math.random() * 360), (name, hue) => promote(recording, name, hue))
@@ -232,6 +234,17 @@ function explain(trouble) {
 	problem.hidden = false
 }
 
+// The arc over the red dot fills steadily to halfway in ARC_HALFWAY, as if that were all the time
+// there is, then ever more slowly, full only at LONGEST_SOUND: a logarithm, its pace where the
+// two halves meet matching the first half's, so there's no kink
+const ARC_HALFWAY = 20 // seconds
+let slowing = ARC_HALFWAY // seconds: the logarithm's scale, found by refining a guess
+for (let step = 0; step < 20; step++) slowing = ARC_HALFWAY / Math.log(1 + (LONGEST_SOUND - ARC_HALFWAY) / slowing)
+function arcFilled(seconds) {
+	if (seconds <= ARC_HALFWAY) return seconds / ARC_HALFWAY / 2
+	return Math.min(1, 0.5 + 0.5 * Math.log(1 + (seconds - ARC_HALFWAY) / slowing) / Math.log(1 + (LONGEST_SOUND - ARC_HALFWAY) / slowing))
+}
+
 // Press and hold the red dot to record, up to LONGEST_SOUND. The microphone is taped block by
 // block (the "tape" processor in voices.js); a silent gain keeps the tape in the audio graph so
 // it runs. The recording joins the recent sounds
@@ -264,7 +277,7 @@ recorder.addEventListener("pointerdown", async (event) => {
 	recorder.classList.add("recording")
 	requestAnimationFrame(function fill() {
 		if (!taping) return
-		recorder.style.setProperty("--taken", (performance.now() - taping.started) / 1000 / LONGEST_SOUND)
+		recorder.style.setProperty("--taken", arcFilled((performance.now() - taping.started) / 1000))
 		requestAnimationFrame(fill)
 	})
 })
@@ -303,19 +316,51 @@ async function nameByWords(id, samples, sampleRate) {
 	if (!transcriber) {
 		transcriber = new Worker("transcribe.js", { type: "module" })
 		transcriber.onmessage = ({ data }) => {
-			hearing.get(data.id)(data.text)
+			if ("downloading" in data) {
+				for (const waiting of hearing.keys()) showListening(waiting, `GETTING READY ${Math.round(data.downloading * 100)}%`)
+				return
+			}
+			hearing.get(data.id)(data)
 			hearing.delete(data.id)
 		}
+		// The worker's own script failing to load, or the library it imports
+		transcriber.onerror = (event) => {
+			for (const answer of hearing.values()) answer({ error: event.message || "the listener wouldn't load" })
+			hearing.clear()
+		}
 	}
-	const speech = await at16k(samples, sampleRate)
-	const text = await new Promise((resolve) => {
-		hearing.set(id, resolve)
-		transcriber.postMessage({ id, samples: speech })
-	})
-	const name = nameFrom(text)
-	if (!name) return
-	await nameRecording(id, name)
+	showListening(id, "LISTENING…")
+	const heard = await at16k(samples, sampleRate)
+		.then((speech) => new Promise((resolve) => {
+			hearing.set(id, resolve)
+			transcriber.postMessage({ id, samples: speech })
+		}))
+		.catch((error) => ({ error: error.message }))
+	if (heard.error) {
+		console.error("Couldn't name a recording by its words:", heard.error)
+		return showListening(id, `COULDN'T LISTEN: ${heard.error}`)
+	}
+	listening.delete(id)
+	const name = nameFrom(heard.text)
+	if (name) await nameRecording(id, name)
 	show()
+}
+
+// How naming a recording is going, shown after its time until it's named: kept here, not with the
+// recording, so it's gone on the next visit
+const listening = new Map() // recording id -> how it's going
+
+function showListening(id, status) {
+	listening.set(id, status)
+	const row = recordingsList.querySelector(`[data-id="${id}"]`)
+	if (row) labelRow(row)
+}
+
+function labelRow(row) {
+	const status = listening.get(Number(row.dataset.id))
+	row.querySelector(".when").textContent = status ? `${row.dataset.label} · ${status}` : row.dataset.label
+	// A reason it couldn't listen is shown whole, however many lines it takes
+	row.classList.toggle("trouble", status?.startsWith("COULDN'T") ?? false)
 }
 
 // Whisper listens at 16 kHz, 30 seconds at a time: the start is enough to name a sound by
