@@ -392,7 +392,8 @@ const LONGEST_NAME = 20 // letters
 const NOT_SPEECH = ["YOU", "THANK YOU", "THANKS FOR WATCHING", "BYE"]
 function nameFrom(text) {
 	const said = text.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/\s+/g, " ").trim().toUpperCase()
-	if (!/\p{L}{2}/u.test(said) || NOT_SPEECH.includes(said)) return null
+	// Counting comes out as figures, "1, 2, 2", which name a recording as well as words do
+	if (!/[\p{L}\p{N}]/u.test(said) || NOT_SPEECH.includes(said)) return null
 	let name = ""
 	for (const word of said.split(" ")) {
 		if (`${name} ${word}`.trim().length > LONGEST_NAME) break
