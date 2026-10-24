@@ -1,6 +1,7 @@
 // Plays any number of overlapping copies of the call. Each copy is rebuilt from short, overlapping,
 // faded grains of the recording: how fast it moves through the recording is its speed, and how fast
 // each grain is read is its pitch, so the two bend independently, live, on every copy at once.
+// Each copy can also carry its own pitch on top (a note played on the number keys).
 //
 // Grains are placed by WSOLA: each new grain may slide a few milliseconds from where it would
 // naturally start, to wherever the recording best matches what the previous grain is playing as
@@ -28,7 +29,7 @@ class Voices extends AudioWorkletProcessor {
 		this.recording = [] // one Float32Array per channel
 		this.voices = []
 		this.port.onmessage = ({ data }) => {
-			if (data === "play") this.voices.push(null)
+			if ("note" in data) this.voices.push({ note: data.note, grains: null })
 			else this.recording = data.channels
 		}
 	}
@@ -61,14 +62,14 @@ class Voices extends AudioWorkletProcessor {
 	}
 
 	process(_inputs, outputs, parameters) {
-		const pitch = parameters.pitch[0]
+		const knobPitch = parameters.pitch[0]
 		const speed = parameters.speed[0]
 		const out = outputs[0]
 		const length = this.recording[0]?.length ?? 0
-		for (let v = 0; v < this.voices.length; v++) {
+		for (const voice of this.voices) {
+			const pitch = knobPitch * voice.note
 			// A new copy starts with a grain already at full strength, so its first moment is not faded in
-			this.voices[v] ??= { position: 0, untilGrain: 0, grains: [{ start: -HOP * pitch, age: HOP }] }
-			const voice = this.voices[v]
+			if (!voice.grains) Object.assign(voice, { position: 0, untilGrain: 0, grains: [{ start: -HOP * pitch, age: HOP }] })
 			for (let i = 0; i < out[0].length; i++) {
 				if (voice.untilGrain-- <= 0 && voice.position < length) {
 					const previous = voice.grains[voice.grains.length - 1]

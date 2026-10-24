@@ -120,6 +120,8 @@
 		const LOUDNESS_REACH = 3
 		const LOUDNESS_CURVE = 2.5
 		const TILT_DEGREES = 8
+		// Number keys 1-8 play the call up a major scale, do to do, in semitones above as recorded
+		const SCALE = [0, 2, 4, 5, 7, 9, 11, 12]
 
 		const audio = new AudioContext()
 		const volume = audio.createGain()
@@ -141,11 +143,12 @@
 		let wheelTurned = false // the wheel turned the knob during this hold, so it springs back after
 		const held = new Set() // pointers currently holding the button or the knob
 
-		async function play() {
+		// note: this call's own pitch, on top of the knob's (1 is as recorded)
+		async function play(note = 1) {
 			// Browsers only allow sound after a touch, so wake the audio on the press itself
 			if (audio.state !== "running") audio.resume()
 			const node = await voices
-			node.port.postMessage("play")
+			node.port.postMessage({ note })
 		}
 
 		async function glide(parameter, value, seconds = 0.02) {
@@ -267,6 +270,17 @@
 			}
 		})
 		button.addEventListener("contextmenu", (event) => event.preventDefault())
+
+		let unflash
+		addEventListener("keydown", (event) => {
+			const degree = Number(event.key) - 1
+			// One note per keypress: holding a key down would otherwise machine-gun it
+			if (!(degree in SCALE) || event.repeat) return
+			play(2 ** (SCALE[degree] / 12))
+			button.classList.add("pressed")
+			clearTimeout(unflash)
+			unflash = setTimeout(() => held.size || button.classList.remove("pressed"), 90)
+		})
 
 		let unpress
 		// Listened for on the whole page: wheel events go to whatever is under the cursor, and a held
