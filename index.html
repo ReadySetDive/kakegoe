@@ -161,6 +161,49 @@
 			border-radius: 50%;
 			background: #e8dcd8;
 		}
+		.fetching {
+			width: min(28rem, 88vw);
+			box-sizing: border-box;
+		}
+		.fetching input[name="url"] {
+			width: 100%;
+			box-sizing: border-box;
+		}
+		/* The sounds found on a page, to play and add */
+		.found {
+			width: 100%;
+			max-height: 45vh;
+			overflow-y: auto;
+			margin: 0;
+			padding: 0;
+			list-style: none;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr);
+			gap: 0.4rem;
+			font-size: 0.8rem;
+		}
+		.found:empty {
+			display: none;
+		}
+		.found li {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+		}
+		.found .name {
+			flex: 1;
+			min-width: 0;
+			overflow: hidden;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+		}
+		.found .length {
+			color: #8a7d7a;
+		}
+		/* Too long to add, though it can still be played */
+		.found .add.too-long {
+			opacity: 0.35;
+		}
 		.problem {
 			max-width: 16rem;
 			margin: 0;
@@ -168,12 +211,16 @@
 			font-size: 0.72rem;
 			color: hsl(3 90% 72%);
 		}
+		/* The red dot in the middle, its two sides as wide as the wider of them */
 		.bar {
 			position: fixed;
 			left: 50%;
 			bottom: max(1.2rem, env(safe-area-inset-bottom));
 			translate: -50% 0;
-			display: flex;
+			/* Its own width, not squeezed into the half of the screen right of where it's placed */
+			width: max-content;
+			display: grid;
+			grid-template-columns: 1fr auto auto auto 1fr;
 			align-items: center;
 			gap: 0.8rem;
 			font-size: 0.72rem;
@@ -181,6 +228,12 @@
 		}
 		.bar button {
 			color: #b3a5a1;
+		}
+		.from-file {
+			justify-self: end;
+		}
+		.from-web {
+			justify-self: start;
 		}
 		.divider {
 			width: 2px;
@@ -347,13 +400,22 @@
 			<button class="icon bin" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button>
 		</li>
 	</template>
+	<template class="found-sound">
+		<li>
+			<button type="button" class="icon play" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg></button>
+			<span class="name"></span>
+			<span class="length"></span>
+			<button type="button" class="add">ADD</button>
+			<audio preload="metadata"></audio>
+		</li>
+	</template>
 	<!-- Pinned to the bottom: add a sound from a file, record one, or add one from the web -->
 	<nav class="bar">
 		<button class="from-file">ADD FILE</button>
 		<span class="divider"></span>
 		<button class="record" aria-label="Hold to record"><svg class="taken" viewBox="-100 -100 200 200"><path class="track" d="M -100 0 A 100 100 0 0 1 100 0" pathLength="1"/><path class="used" d="M -100 0 A 100 100 0 0 1 100 0" pathLength="1"/></svg></button>
 		<span class="divider"></span>
-		<button class="from-web">ADD URL</button>
+		<button class="from-web">ADD FROM URL</button>
 		<input type="file" accept="audio/*" hidden>
 	</nav>
 	<div class="wheel" popover="manual"></div>
@@ -368,9 +430,10 @@
 	</dialog>
 	<dialog class="fetching">
 		<form>
-			<input name="url" type="url" placeholder="https://" required autocomplete="off">
+			<input name="url" type="url" placeholder="A sound, or a page with sounds on it" required autocomplete="off">
 			<p class="problem" hidden></p>
-			<div class="choices"><button type="button" class="cancel">CANCEL</button><button>ADD</button></div>
+			<ol class="found"></ol>
+			<div class="choices"><button type="button" class="cancel">CANCEL</button><button>FETCH</button></div>
 		</form>
 	</dialog>
 </body>

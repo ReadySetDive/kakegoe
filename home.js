@@ -106,8 +106,12 @@ async function addFrom(sound, source) {
 		decoded.getChannelData(channel).subarray(0, length).forEach((sample, index) => mono[index] += sample / decoded.numberOfChannels)
 	}
 	const copy = wav(mono, decoded.sampleRate)
-	const name = decodeURIComponent(source.split("/").at(-1)).replace(/\.[^.]*$/, "")
-	startNaming("ADD", name, Math.floor(Math.random() * 360), (name, hue) => addButton(copy, name, hue))
+	startNaming("ADD", nameOf(source), Math.floor(Math.random() * 360), (name, hue) => addButton(copy, name, hue))
+}
+
+// A file's name, from its path, without its extension
+function nameOf(path) {
+	return decodeURIComponent(path.split("/").at(-1)).replace(/\.[^.]*$/, "")
 }
 
 document.querySelector(".from-file").addEventListener("click", () => fileInput.click())
@@ -117,25 +121,105 @@ fileInput.addEventListener("change", async () => {
 	await addFrom(file, file.name).catch(() => alert("That file isn't a sound this browser can play."))
 })
 
+// Sites that let other sites read them are fetched directly; the rest through the relay
+// (relay/worker.js), which fetches pages and sounds on the soundboard's behalf. at: the address
+// the response came from in the end, after any redirects
+const RELAY = "https://soundboard-relay.matt-grdy.workers.dev/"
+async function fetchFromWeb(url) {
+	const direct = await fetch(url).catch(() => null)
+	if (direct?.ok) return { response: direct, at: direct.url }
+	const relayed = await fetch(`${RELAY}?url=${encodeURIComponent(url)}`)
+	return { response: relayed, at: relayed.headers.get("x-final-url") ?? url }
+}
+
+const found = fetching.querySelector(".found")
+const LONGEST_FOUND = 60 // sounds listed from one page
+
 document.querySelector(".from-web").addEventListener("click", () => {
 	fetchingForm.reset()
 	problem.hidden = true
+	found.replaceChildren()
 	fetching.showModal()
 })
+// The sounds found on a page play while it's open, never after
+fetching.addEventListener("close", () => {
+	for (const player of found.querySelectorAll("audio")) player.pause()
+})
+
+// An address is a sound to add, or a web page to look for sounds on
 fetchingForm.addEventListener("submit", async (event) => {
 	event.preventDefault()
 	const url = fetchingForm.elements.url.value
 	problem.hidden = true
-	// Sites must allow other sites to use their files; many sound sites don't
-	const response = await fetch(url).catch(() => null)
-	if (!response?.ok) return explain(response ? "Nothing to be found at that address." : "That site won't let other sites use its sounds. Download it, then add it from a file.")
-	const sound = await response.blob()
+	found.replaceChildren()
+	const { response, at } = await fetchFromWeb(url).catch(() => ({}))
+	if (!response) return explain("Couldn't reach that address.")
+	if (!response.ok) return explain(response.status === 415 ? "That address is neither a web page nor a sound." : "Nothing to be found at that address.")
+	if (/^(text\/html|application\/xhtml)/.test(response.headers.get("content-type"))) return listSounds(await response.text(), at)
+	await addFromWeb(await response.blob(), at)
+})
+
+async function addFromWeb(sound, at) {
 	fetching.close()
-	await addFrom(sound, new URL(url).pathname).catch(() => {
+	await addFrom(sound, new URL(at).pathname).catch(() => {
 		fetching.showModal()
 		explain("That isn't a sound this browser can play.")
 	})
-})
+}
+
+// Every sound the page mentions, anywhere in it: links, players, and the scripts and data that
+// pages built in the browser carry. Failing that, the page's own script files are searched too
+async function listSounds(page, at) {
+	let sounds = soundsIn(page, at)
+	if (!sounds.length) {
+		const scripts = [...new DOMParser().parseFromString(page, "text/html").querySelectorAll("script[src]")]
+		for (const script of scripts) {
+			const { response } = await fetchFromWeb(new URL(script.getAttribute("src"), at).href).catch(() => ({}))
+			if (response?.ok) sounds = [...new Set([...sounds, ...soundsIn(await response.text(), at)])]
+		}
+	}
+	if (!sounds.length) return explain("No sounds found on that page.")
+	found.replaceChildren(...sounds.slice(0, LONGEST_FOUND).map(foundRow))
+}
+
+function soundsIn(text, at) {
+	// Scripts write their slashes \/ and pages their ampersands &amp;
+	const plain = text.replaceAll("\\/", "/").replaceAll("&amp;", "&")
+	const mentions = plain.match(/[^\s"'`()<>\\,;]+\.(?:mp3|wav|ogg|oga|m4a|aac|flac|opus)(?:\?[^\s"'`()<>\\,;]*)?/gi) ?? []
+	const addresses = mentions.map((mention) => URL.parse(mention, at)?.href).filter(Boolean)
+	return [...new Set(addresses)]
+}
+
+// A sound found on a page: played straight from the page's site, which needs no permission, and
+// only fetched, through the relay if need be, when added. Longer than LONGEST_SOUND, it can be
+// played but not added
+function foundRow(address) {
+	const row = document.querySelector("template.found-sound").content.firstElementChild.cloneNode(true)
+	const player = row.querySelector("audio")
+	const add = row.querySelector(".add")
+	player.src = address
+	row.querySelector(".name").textContent = nameOf(new URL(address).pathname)
+	player.addEventListener("loadedmetadata", () => {
+		row.querySelector(".length").textContent = `${Math.floor(player.duration / 60)}:${String(Math.round(player.duration % 60)).padStart(2, "0")}`
+		add.classList.toggle("too-long", player.duration > LONGEST_SOUND)
+	})
+	row.querySelector(".play").addEventListener("click", () => {
+		const playing = !player.paused
+		for (const other of found.querySelectorAll("audio")) other.pause()
+		if (!playing) {
+			player.currentTime = 0
+			player.play()
+		}
+	})
+	add.addEventListener("click", async () => {
+		if (add.classList.contains("too-long")) return explain(`That one's too long: sounds can be ${LONGEST_SOUND} seconds at most.`)
+		problem.hidden = true
+		const { response, at } = await fetchFromWeb(address).catch(() => ({}))
+		if (!response?.ok) return explain("Couldn't fetch that sound.")
+		await addFromWeb(await response.blob(), at)
+	})
+	return row
+}
 
 function explain(trouble) {
 	problem.textContent = trouble
