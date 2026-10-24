@@ -60,6 +60,14 @@
 			pointer-events: none;
 			transform: rotate(var(--turn, 0deg));
 		}
+		/* Wheel turns step the knob like a ratchet, each step easing into place with a slight
+		   overshoot; letting go after wheel turns springs it back to normal */
+		.dial.cogging, .dial.cogging .dot {
+			transition: transform 0.16s cubic-bezier(0.3, 1.4, 0.5, 1), rotate 0.16s cubic-bezier(0.3, 1.4, 0.5, 1);
+		}
+		.dial.springing, .dial.springing .dot {
+			transition: transform 0.5s cubic-bezier(0.3, 1.5, 0.5, 1), rotate 0.5s cubic-bezier(0.3, 1.5, 0.5, 1);
+		}
 		.dot {
 			position: absolute;
 			top: 50%;
@@ -112,7 +120,7 @@
 
 		const audio = new AudioContext()
 		const volume = audio.createGain()
-		// Many overlapping calls at up to 1.5x volume would clip; this holds them just under full scale
+		// Many overlapping calls at up to 2.5x volume would clip; this holds them just under full scale
 		const limiter = new DynamicsCompressorNode(audio, { threshold: -3, knee: 0, ratio: 20, attack: 0.002, release: 0.1 })
 		// Every press becomes a voice in one granular player (voices.js), so pitch and speed bend
 		// independently, live, on every call already sounding
@@ -127,6 +135,7 @@
 
 		let hand = 0 // degrees the knob has been turned to (positive is anticlockwise), before the detent eases it
 		let bending = null // the pointer holding the middle of the button, and where it pressed
+		let wheelTurned = false // the wheel turned the knob during this hold, so it springs back after
 		const held = new Set() // pointers currently holding the button or the knob
 
 		async function play() {
@@ -136,18 +145,20 @@
 			node.port.postMessage("play")
 		}
 
-		async function glide(parameter, value) {
+		async function glide(parameter, value, seconds = 0.02) {
 			const node = await voices
-			node.parameters.get(parameter).setTargetAtTime(value, audio.currentTime, 0.02)
+			node.parameters.get(parameter).setTargetAtTime(value, audio.currentTime, seconds)
 		}
 
-		function turnKnob(degrees) {
+		// `seconds` is how long the pitch takes to follow; wheel steps and spring-backs glide audibly
+		function turnKnob(degrees, seconds = 0.02, motion = "") {
+			dial.className = `dial ${motion}`
 			hand = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, degrees))
 			// Eases to zero near the centre, so dwelling close to normal settles there, while
 			// matching the hand exactly at the detent's edge so there is never a jump
 			const knob = Math.abs(hand) < DETENT ? hand * (hand / DETENT) ** 2 : hand
 			dial.style.setProperty("--turn", `${-knob}deg`)
-			glide("pitch", 2 ** (knob / KNOB_LIMIT))
+			glide("pitch", 2 ** (knob / KNOB_LIMIT), seconds)
 		}
 
 		// across: -1 (dragged fully left) .. 1 (right); down: -1 (fully up) .. 1 (down)
@@ -156,7 +167,7 @@
 			button.style.setProperty("--tilt-x", `${-down * TILT_DEGREES}deg`)
 			button.style.setProperty("--tilt-y", `${across * TILT_DEGREES}deg`)
 			glide("speed", across < 0 ? 1 + across * 0.8 : 1 + across * 0.75) // 0.2x .. 1.75x
-			volume.gain.setTargetAtTime(down < 0 ? 1 - down * 0.5 : 1 - down * 0.8, audio.currentTime, 0.02) // 1.5x .. 0.2x
+			volume.gain.setTargetAtTime(down < 0 ? 1 - down * 1.5 : 1 - down * 0.8, audio.currentTime, 0.02) // 2.5x .. 0.2x
 		}
 
 		function centre() {
@@ -198,7 +209,13 @@
 		for (const release of ["pointerup", "pointercancel"]) {
 			button.addEventListener(release, (event) => {
 				held.delete(event.pointerId)
-				if (held.size === 0) button.classList.remove("pressed")
+				if (held.size === 0) {
+					button.classList.remove("pressed")
+					if (wheelTurned) {
+						wheelTurned = false
+						turnKnob(0, 0.12, "springing")
+					}
+				}
 				if (event.pointerId === bending?.pointerId) {
 					// Let go and the button springs back flat, the call back to normal speed and volume
 					bending = null
@@ -221,7 +238,8 @@
 			// While the button is held down, the wheel turns the pitch knob instead of pressing
 			if (held.size) {
 				const pixels = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 33 : event.deltaY
-				turnKnob(hand - pixels * WHEEL_DEGREES_PER_PIXEL)
+				turnKnob(hand - pixels * WHEEL_DEGREES_PER_PIXEL, 0.05, "cogging")
+				wheelTurned = true
 				return
 			}
 			// Otherwise every notch of a mouse wheel is a press. A notch arrives as one big jump (a
