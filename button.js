@@ -1,6 +1,7 @@
 // The button shared by every sound. Each sound's page sits in its own folder, beside its
 // sound.mp3. The page loads sounds.js, listing the built-in sounds, and saved.js, holding the
 // buttons made on this device, ahead of this
+import { updates } from "./updates.js"
 
 // Opened by the home page's INSTALL: opening doesn't play the call, and the first press does
 // nothing but bring up the browser's offer to install, which a word under the button points to
@@ -16,10 +17,8 @@ if (openedToInstall) {
 }
 
 // Opened by the home page's EDIT: the button can be cropped (see the crop arc below), and
-// opening it doesn't play the call
-const openedToEdit = new URLSearchParams(location.search).has("edit")
-// A crop saved for this button, applied as the sound loads, except while editing it
-const crop = openedToEdit ? null : cropOf(location.pathname)
+// opening it doesn't play the call. The site's own sounds can't be
+const openedToEdit = new URLSearchParams(location.search).has("edit") && location.pathname.includes("/custom/")
 
 // Whether this button is installed, noted for the home page's wheel (see saved.js): it is when
 // it's just been installed, or opened as an app; it isn't when the browser offers to install it
@@ -29,6 +28,8 @@ if (matchMedia("(display-mode: standalone)").matches) noteInstalled(location.pat
 
 const folder = location.pathname.split("/").at(-2)
 const thisSound = SOUNDS.find((sound) => sound.folder === folder) ?? await savedButton(folder)
+// The button's crop, applied as the sound loads, except while editing it
+const crop = openedToEdit ? null : thisSound.crop ?? null
 
 // Lets iPhones play it even with the ring/silent switch on silent
 if (navigator.audioSession) navigator.audioSession.type = "playback"
@@ -594,6 +595,17 @@ if (typeof DeviceOrientationEvent?.requestPermission === "function") {
 	button.addEventListener("click", () => DeviceOrientationEvent.requestPermission(), { once: true })
 }
 
+// Two taps in a row on the page around the button stop every call still sounding; one alone does
+// nothing, so a press that misses the button doesn't cut anything short
+const DOUBLE_TAP = 350 // ms
+let backgroundTapped = 0
+document.addEventListener("pointerdown", (event) => {
+	if (event.target !== document.body && event.target !== document.documentElement) return
+	if (event.timeStamp - backgroundTapped > DOUBLE_TAP) return backgroundTapped = event.timeStamp
+	backgroundTapped = 0
+	voices.then((node) => node.port.postMessage({ silence: true }))
+})
+
 // Opened to edit: an arc over the button, from 9 o'clock over the top to 3 o'clock, is the whole
 // sound, its loudness spiking out along it. A handle at either end crops it, sounding where
 // it's dragged to; pressing the button plays what's kept. SAVE keeps the crop for this button
@@ -604,7 +616,7 @@ const SHORTEST_CROP = 0.1 // seconds
 const cropping = { from: 0, to: Infinity } // what's kept, in seconds
 
 function showCropper(samples, duration) {
-	Object.assign(cropping, cropOf(location.pathname) ?? { from: 0, to: duration })
+	Object.assign(cropping, thisSound.crop ?? { from: 0, to: duration })
 	document.body.classList.add("editing")
 	// Degrees clockwise from 12 o'clock, for a time in the sound, and a point on the ring's view there
 	const angleOf = (seconds) => -90 + (seconds / duration) * 180
@@ -664,9 +676,9 @@ function showCropper(samples, duration) {
 
 	const home = new URL("./", import.meta.url)
 	document.querySelector(".editing-controls .cancel").addEventListener("click", () => location.replace(home))
-	document.querySelector(".editing-controls .save").addEventListener("click", () => {
+	document.querySelector(".editing-controls .save").addEventListener("click", async () => {
 		const whole = cropping.from < 0.01 && cropping.to > duration - 0.01
-		noteCrop(location.pathname, whole ? null : { from: cropping.from, to: cropping.to })
+		await cropButton(thisSound, whole ? null : { from: cropping.from, to: cropping.to })
 		location.replace(home)
 	})
 }
@@ -679,6 +691,8 @@ let away = !openedToInstall && !openedToEdit // opening the page counts as comin
 async function comeBack() {
 	if (!away || document.hidden) return
 	away = false
+	// A newer version published meanwhile: coming back reloads into it, which plays the call anyway
+	if (updates.waiting) return location.reload()
 	// A press that brought the page into focus has played already
 	if (held.size) return
 	const awake = await Promise.race([

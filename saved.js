@@ -1,16 +1,36 @@
 // Recordings and buttons made on this device, kept in its storage (IndexedDB) and shared by every
-// page and the service worker. None of it reaches the site: clearing the browser's data loses it
+// page and the service worker. None of it reaches the site: clearing the browser's data loses it.
+// The sounds themselves are kept apart, each once, for recordings and buttons to point at: a
+// copied button shares its sound, and each has its own crop. An entry points at a kept sound by
+// its key (sound), or at one of the site's own (site, its folder)
 const RECENT_LIMIT = 10
 // Recordings stop, and sounds added from files or the web are cut off, at this length. Much
 // longer, and phones run short of memory, since a button holds its whole sound decoded
 const LONGEST_SOUND = 300 // seconds
+// The site's own folder, for its sounds, wherever this is loaded from
+const SITE = new URL(".", globalThis.document?.currentScript?.src ?? location.href)
 
 function saved(storeName, mode, work) {
 	return new Promise((resolve, reject) => {
-		const opening = indexedDB.open("soundboard", 1)
-		opening.onupgradeneeded = () => {
-			opening.result.createObjectStore("recordings", { keyPath: "id", autoIncrement: true })
-			opening.result.createObjectStore("buttons", { keyPath: "id" })
+		const opening = indexedDB.open("soundboard", 2)
+		opening.onupgradeneeded = (event) => {
+			if (event.oldVersion < 1) {
+				opening.result.createObjectStore("recordings", { keyPath: "id", autoIncrement: true })
+				opening.result.createObjectStore("buttons", { keyPath: "id" })
+			}
+			// Each recording and button used to hold its own sound; they're moved apart, to be shared
+			if (event.oldVersion < 2) {
+				const sounds = opening.result.createObjectStore("sounds", { autoIncrement: true })
+				for (const storeName of ["recordings", "buttons"]) {
+					opening.transaction.objectStore(storeName).openCursor().onsuccess = ({ target: { result: cursor } }) => {
+						if (!cursor) return
+						sounds.add(cursor.value.sound).onsuccess = ({ target: { result: key } }) => {
+							cursor.update({ ...cursor.value, sound: key })
+							cursor.continue()
+						}
+					}
+				}
+			}
 		}
 		opening.onerror = () => reject(opening.error)
 		opening.onsuccess = () => {
@@ -22,11 +42,29 @@ function saved(storeName, mode, work) {
 	})
 }
 
+// The sound a recording or button plays, whole: its crop is applied as it's played
+async function soundOf(entry) {
+	if (entry.site) return (await fetch(new URL(`${entry.site}/sound.mp3`, SITE))).blob()
+	return saved("sounds", "readonly", (sounds) => sounds.get(entry.sound))
+}
+
+// Gives the sound's key
+function keepSound(sound) {
+	return saved("sounds", "readwrite", (sounds) => sounds.add(sound))
+}
+
+// Once nothing points at a sound, it goes
+async function letGoOf(entry) {
+	if (entry.site) return
+	const entries = [...await saved("recordings", "readonly", (recordings) => recordings.getAll()), ...await savedButtons()]
+	if (!entries.some((other) => other.sound === entry.sound)) await saved("sounds", "readwrite", (sounds) => sounds.delete(entry.sound))
+}
+
 // Recordings go by when they were made, until named by what's said in them (see home.js)
-function saveRecording(samples, sampleRate) {
+async function saveRecording(samples, sampleRate) {
 	// Asks the browser not to clear the site's storage when the device runs short of space
 	navigator.storage?.persist()
-	return keepRecording({ sound: wav(samples, sampleRate), at: Date.now() })
+	return keepRecording({ sound: await keepSound(wav(samples, sampleRate)), at: Date.now() })
 }
 
 // Into the recent list, which holds only the latest few. Gives the recording's id
@@ -47,8 +85,10 @@ async function recentRecordings() {
 	return (await saved("recordings", "readonly", (recordings) => recordings.getAll())).reverse()
 }
 
-function deleteRecording(id) {
-	return saved("recordings", "readwrite", (recordings) => recordings.delete(id))
+async function deleteRecording(id) {
+	const recording = await saved("recordings", "readonly", (recordings) => recordings.get(id))
+	await saved("recordings", "readwrite", (recordings) => recordings.delete(id))
+	await letGoOf(recording)
 }
 
 // Which buttons are installed as apps on this device, by their pages' paths. Browsers don't say,
@@ -63,40 +103,37 @@ function noteInstalled(path, installed) {
 	localStorage.setItem("installed", JSON.stringify(installed ? [...others, path] : others))
 }
 
-// How each button's sound is cropped on this device, by its page's path: { from, to }, in
-// seconds. The sound itself is never changed, so a crop can always be widened again
-function cropOf(path) {
-	return JSON.parse(localStorage.getItem("crops") ?? "{}")[path] ?? null
+// A button for a sound added from a file or the web
+async function addButton(sound, name, hue) {
+	return makeButton({ sound: await keepSound(sound) }, name, hue)
 }
 
-// crop: null for the whole sound
-function noteCrop(path, crop) {
-	const crops = JSON.parse(localStorage.getItem("crops") ?? "{}")
-	if (crop) crops[path] = crop
-	else delete crops[path]
-	localStorage.setItem("crops", JSON.stringify(crops))
+// entry: what the button plays, from a recording, another button, or one of the site's sounds
+function makeButton(entry, name, hue) {
+	const button = { id: crypto.randomUUID().slice(0, 8), name: name.toUpperCase(), hue, sound: entry.sound, site: entry.site, crop: entry.crop }
+	return saved("buttons", "readwrite", (buttons) => buttons.add(button))
 }
 
-// sound: a WAV, like a recording's
-function addButton(sound, name, hue) {
-	const id = crypto.randomUUID().slice(0, 8)
-	return saved("buttons", "readwrite", (buttons) => buttons.add({ id, name: name.toUpperCase(), hue, sound }))
-}
-
-// A recording becomes a button, leaving the recent list
+// A recording becomes a button, leaving the recent list, its sound and crop going with it
 async function promote(recording, name, hue) {
-	await addButton(recording.sound, name, hue)
-	await deleteRecording(recording.id)
+	await makeButton(recording, name, hue)
+	await saved("recordings", "readwrite", (recordings) => recordings.delete(recording.id))
 }
 
-// A button goes back to being a recording, the newest, named after the button
+// A button goes back to being a recording, the newest, named after the button, its crop kept.
+// Copies of it pointing at the same sound are left as they are
 async function demote(button) {
-	await keepRecording({ sound: button.sound, name: button.name, at: Date.now() })
+	await keepRecording({ sound: button.sound, site: button.site, crop: button.crop, name: button.name, at: Date.now() })
 	await saved("buttons", "readwrite", (buttons) => buttons.delete(button.id))
 }
 
 function rename(button, name, hue) {
 	return saved("buttons", "readwrite", (buttons) => buttons.put({ ...button, name: name.toUpperCase(), hue }))
+}
+
+// crop: { from, to }, in seconds, or null for the whole sound, which itself is never changed
+function cropButton(button, crop) {
+	return saved("buttons", "readwrite", (buttons) => buttons.put({ ...button, crop }))
 }
 
 function savedButtons() {
@@ -105,6 +142,16 @@ function savedButtons() {
 
 function savedButton(id) {
 	return saved("buttons", "readonly", (buttons) => buttons.get(id))
+}
+
+// Crops used to be kept by each button's page path; they move onto the buttons themselves. The
+// site's own sounds can't be cropped any more, so theirs go
+async function adoptOldCrops() {
+	for (const [path, crop] of Object.entries(JSON.parse(localStorage.getItem("crops") ?? "{}"))) {
+		const button = path.includes("/custom/") && await savedButton(path.split("/").at(-2))
+		if (button) await cropButton(button, crop)
+	}
+	localStorage.removeItem("crops")
 }
 
 // A recording, from its blocks, without the quiet either side, so a press sounds at once, and

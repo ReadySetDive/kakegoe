@@ -12,6 +12,7 @@ const FILES = [
 	"maskable-512.png",
 	"apple-touch-icon.png",
 	"home.js",
+	"updates.js",
 	"transcribe.js",
 	"sounds.js",
 	"saved.js",
@@ -65,7 +66,8 @@ self.addEventListener("fetch", (event) => {
 	event.respondWith((async () => {
 		try {
 			const fresh = await fetch(event.request, { cache: "no-cache" })
-			if (fresh.ok) (await caches.open(CACHE)).put(event.request, fresh.clone())
+			// Only what's fetched whole is kept: checks for a newer version (see updates.js) ask just for dates
+			if (fresh.ok && event.request.method === "GET") (await caches.open(CACHE)).put(event.request, fresh.clone())
 			return fresh
 		} catch {
 			return (await caches.match(event.request, { ignoreSearch: true })) || Response.error()
@@ -121,7 +123,7 @@ async function customFile(id, file) {
 			}, { headers: { "content-type": "application/manifest+json" } })
 		// The recording, as a WAV; named like the built-in sounds' files so the button finds it the same way
 		case "sound.mp3":
-			return new Response(button.sound)
+			return new Response(await soundOf(button))
 		case "icon.png":
 			return new Response(await buttonIcon(button.hue, "floating"))
 		case "maskable.png":

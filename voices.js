@@ -48,7 +48,8 @@ class Voices extends AudioWorkletProcessor {
 			} else if ("scrub" in data) {
 				// through: how far into its part to drag the copy (0 to 1), or null to stop scrubbing
 				for (const voice of this.voices) if (voice.id === data.scrub) Object.assign(voice, { held: true, scrubTo: data.through })
-			} else this.heldSpeed = data.heldSpeed
+			} else if ("silence" in data) this.voices = []
+			else this.heldSpeed = data.heldSpeed
 		}
 	}
 

@@ -1,7 +1,13 @@
 // The home page: every button, built in (sounds.js) and made on this device (saved.js), then the
 // recent recordings, to play, save, promote to a button of their own, or bin; and pinned to the
 // bottom, the ways to make sounds: adding one from a file or the web, or recording one
+import { updates } from "./updates.js"
 navigator.serviceWorker?.register("sw.js")
+
+// A newer version published while away: coming back reloads into it
+const comeBack = () => !document.hidden && updates.waiting && location.reload()
+addEventListener("focus", comeBack)
+document.addEventListener("visibilitychange", comeBack)
 
 const sounds = document.querySelector(".sounds")
 const recent = document.querySelector(".recent")
@@ -21,16 +27,21 @@ const SLICE_GAP = 2 // degrees
 // Pulled from the button's middle less than this share of its radius, nothing is chosen
 const PULL_TO_CHOOSE = 0.8
 
-// Drawn afresh whenever a sound or button comes, goes or changes
+let names = new Set() // every button's, so a copy can be named apart
+
+// Drawn afresh whenever a sound or button comes, goes or changes. The site's own sounds can be
+// installed and copied; buttons made here can be edited, renamed and demoted too
 async function show() {
 	sounds.replaceChildren()
+	const buttons = await savedButtons()
+	names = new Set([...SOUNDS, ...buttons].map(({ name }) => name))
 	for (const { folder, name, hue } of SOUNDS) {
-		offerWheel(showButton(`${folder}/`, name, hue), [installing(`${folder}/`), editing(`${folder}/`)])
+		offerWheel(showButton(`${folder}/`, name, hue), [installing(`${folder}/`), copying({ site: folder, name, hue })])
 	}
 	// Served by the service worker rather than the site (see sw.js)
-	for (const button of await savedButtons()) {
+	for (const button of buttons) {
 		const href = `custom/${button.id}/`
-		offerWheel(showButton(href, button.name, button.hue), [installing(href), editing(href), renaming(button), demoting(button)])
+		offerWheel(showButton(href, button.name, button.hue), [installing(href), editing(href), copying(button), renaming(button), demoting(button)])
 	}
 	const recordings = await recentRecordings()
 	recent.hidden = recordings.length === 0
@@ -40,15 +51,23 @@ async function show() {
 // Coming back from a button, the browser shows this page as it was left; a sound recorded there since belongs in it
 addEventListener("pageshow", (event) => event.persisted && show())
 
+// A small copy of the button, in its color, over its name. Only the button itself is pressed: its
+// name isn't part of it, and wraps to the button's width rather than push others aside
 function showButton(href, name, hue) {
+	const sound = document.createElement("div")
+	sound.className = "sound"
+	sound.style.setProperty("--hue", hue)
 	const link = document.createElement("a")
-	link.className = "sound"
+	link.className = "press"
 	link.href = href
-	link.style.setProperty("--hue", hue)
-	link.textContent = name
+	link.ariaLabel = name
 	// Dragging off a button opens its options, rather than dragging the link somewhere
 	link.draggable = false
-	sounds.append(link)
+	const label = document.createElement("span")
+	label.className = "label"
+	label.textContent = name
+	sound.append(link, label)
+	sounds.append(sound)
 	return link
 }
 
@@ -59,13 +78,13 @@ function recordingRow(recording) {
 	row.dataset.name = recording.name ?? ""
 	row.dataset.when = when
 	labelRow(row)
-	row.querySelector(".play").addEventListener("click", () => new Audio(URL.createObjectURL(recording.sound)).play())
+	row.querySelector(".play").addEventListener("click", () => playEntry(recording))
 	row.querySelector(".promote").addEventListener("click", () => {
 		startNaming("PROMOTE", recording.name ?? "", Math.floor(Math.random() * 360), (name, hue) => promote(recording, name, hue))
 	})
 	row.querySelector(".save").addEventListener("click", async () => {
 		const download = document.createElement("a")
-		download.href = URL.createObjectURL(await mp3(recording.sound))
+		download.href = URL.createObjectURL(await mp3(await soundOf(recording), recording.crop))
 		// The Swedish style of date is the sortable one: 2026-10-24 11:52:03
 		download.download = `${recording.name ?? "RECORDING"} ${new Date(recording.at).toLocaleString("sv-SE").replaceAll(":", ".")}.mp3`
 		download.click()
@@ -77,11 +96,21 @@ function recordingRow(recording) {
 	return row
 }
 
-// Saving makes an MP3 of a sound, whatever it was kept as (a recording is a WAV, see saved.js),
-// with lamejs, fetched only when first wanted
+// A recent sound, played as it's cropped
+async function playEntry(entry) {
+	audio ??= new AudioContext()
+	const decoded = await audio.decodeAudioData(await (await soundOf(entry)).arrayBuffer())
+	const source = new AudioBufferSourceNode(audio, { buffer: decoded })
+	source.connect(audio.destination)
+	const { from, to } = entry.crop ?? { from: 0, to: decoded.duration }
+	source.start(0, from, to - from)
+}
+
+// Saving makes an MP3 of a sound, as it's cropped, whatever it was kept as (a recording is a
+// WAV, see saved.js), with lamejs, fetched only when first wanted
 let encoder = null
-async function mp3(sound) {
-	if (sound.type === "audio/mpeg") return sound
+async function mp3(sound, crop) {
+	if (sound.type === "audio/mpeg" && !crop) return sound
 	encoder ??= new Promise((resolve, reject) => {
 		const script = document.createElement("script")
 		script.src = "vendor/lame.min.js"
@@ -91,7 +120,9 @@ async function mp3(sound) {
 	})
 	await encoder
 	const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(await sound.arrayBuffer())
-	const samples = Int16Array.from(mono(decoded), (sample) => Math.max(-1, Math.min(1, sample)) * 0x7fff)
+	const { from, to } = crop ?? { from: 0, to: decoded.duration }
+	const kept = mono(decoded).subarray(Math.round(from * decoded.sampleRate), Math.round(to * decoded.sampleRate))
+	const samples = Int16Array.from(kept, (sample) => Math.max(-1, Math.min(1, sample)) * 0x7fff)
 	const encoding = new lamejs.Mp3Encoder(1, decoded.sampleRate, 128)
 	const frames = []
 	// lamejs takes the samples an MP3 frame at a time
@@ -432,6 +463,29 @@ function installing(href) {
 	return { label: installed ? "INSTALLED" : "INSTALL", unavailable: installed, picture: "M12 4v11M7 10l5 5 5-5M5 20h14", act: () => location.href = `${href}?install` }
 }
 
+// A new button sharing the sound (see saved.js), with its own name and crop, and its color
+// nudged round so the two can be told apart
+const COPY_HUE_STEP = 35 // degrees
+function copying(original) {
+	return {
+		label: "COPY",
+		picture: "M9 9h11v11H9zM5 15V4h11",
+		act: async () => {
+			await makeButton(original, copyName(original.name), (original.hue + COPY_HUE_STEP) % 360)
+			show()
+		},
+	}
+}
+
+// FAHHH 2, then FAHHH 3, and so on; copying FAHHH 2 also makes the next free number
+function copyName(name) {
+	const base = name.replace(/ \d+$/, "")
+	for (let number = 2; ; number++) {
+		const copy = `${base.slice(0, LONGEST_NAME - String(number).length - 1).trim()} ${number}`
+		if (!names.has(copy)) return copy
+	}
+}
+
 // Cropping the button's sound, in the button itself (see button.js)
 function editing(href) {
 	return {
@@ -506,11 +560,9 @@ function offerWheel(link, options) {
 	})
 }
 
-// The small button drawn above a sound's name
 function circleOf(link) {
 	const box = link.getBoundingClientRect()
-	const diameter = parseFloat(getComputedStyle(link, "::before").width)
-	return { x: box.left + box.width / 2, y: box.top + diameter / 2, radius: diameter / 2 }
+	return { x: box.left + box.width / 2, y: box.top + box.height / 2, radius: box.width / 2 }
 }
 
 let turning = null // the open wheel: its options, where it is, and which slice is chosen
@@ -536,7 +588,7 @@ function openWheel(link, options, pointing = false) {
 	wheel.innerHTML = `<svg viewBox="${-outer} ${-outer} ${2 * outer} ${2 * outer}" width="${2 * outer}" height="${2 * outer}" style="left: ${x}px; top: ${y}px">
 		<circle class="hole" r="${inner - 4}"/>${slices.join("")}
 	</svg><span class="named" style="left: ${x}px; top: ${y}px"></span>`
-	wheel.style.setProperty("--hue", link.style.getPropertyValue("--hue"))
+	wheel.style.setProperty("--hue", getComputedStyle(link).getPropertyValue("--hue"))
 	turning = {
 		options,
 		x,
@@ -544,7 +596,7 @@ function openWheel(link, options, pointing = false) {
 		radius,
 		share,
 		pointing,
-		name: link.textContent,
+		name: link.ariaLabel,
 		chosen: null,
 		slices: [...wheel.querySelectorAll(".slice")],
 		named: wheel.querySelector(".named"),
@@ -616,7 +668,7 @@ function startNaming(confirming, name, hue, then) {
 function showPreview() {
 	preview.style.setProperty("--hue", namingForm.elements.hue.value)
 	// A no-break space holds the label's height while there's no name yet
-	preview.textContent = namingForm.elements.name.value.toUpperCase() || " "
+	preview.querySelector(".label").textContent = namingForm.elements.name.value.toUpperCase() || " "
 }
 namingForm.addEventListener("input", showPreview)
 // Enter confirms at a keyboard; on a touch screen it only closes the keyboard, so a name isn't
@@ -631,4 +683,5 @@ naming.addEventListener("close", async () => {
 	show()
 })
 
+await adoptOldCrops()
 show()

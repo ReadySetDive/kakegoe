@@ -40,13 +40,23 @@
 			justify-content: center;
 			gap: 8vmin;
 		}
+		/* A small copy of the sound's button, in its color, over its name, which wraps to its width */
 		.sound {
+			width: min(30vmin, 140px);
 			display: grid;
 			justify-items: center;
+			align-content: start;
 			gap: 1.2rem;
 			color: hsl(var(--hue) 70% 82%);
 			font-size: 0.95em;
-			text-decoration: none;
+			text-align: center;
+			overflow-wrap: anywhere;
+		}
+		.press {
+			display: block;
+			width: 100%;
+			aspect-ratio: 1;
+			border-radius: 50%;
 			-webkit-tap-highlight-color: transparent;
 			/* Pressing and holding opens this page's own options, not the phone's menu or a text selection */
 			-webkit-touch-callout: none;
@@ -54,13 +64,6 @@
 			user-select: none;
 			/* Dragging off a button chooses from its options, rather than scrolling the page */
 			touch-action: none;
-		}
-		/* A small copy of the sound's button, in its color */
-		.sound::before {
-			content: "";
-			width: min(30vmin, 140px);
-			aspect-ratio: 1;
-			border-radius: 50%;
 			background: radial-gradient(circle at 38% 32%, hsl(var(--hue) 100% 68%), hsl(var(--hue) 83% 46%) 45%, hsl(var(--hue) 89% 30%) 100%);
 			box-shadow: 0 1vmin 0 hsl(var(--hue) 94% 18%), 0 2vmin 4vmin rgba(0, 0, 0, 0.6), inset 0 -0.6vmin 2vmin rgba(0, 0, 0, 0.35);
 		}
@@ -469,7 +472,7 @@
 	<!-- Naming a button and picking its color, to promote a sound or rename a button -->
 	<dialog class="naming">
 		<form method="dialog">
-			<span class="sound preview"></span>
+			<span class="sound preview"><span class="press"></span><span class="label"></span></span>
 			<input name="hue" type="range" min="0" max="359" aria-label="Color">
 			<input name="name" placeholder="NAME" maxlength="20" required autocomplete="off">
 			<div class="choices"><button type="button" class="cancel">CANCEL</button><button value="confirm" class="confirm"></button></div>
