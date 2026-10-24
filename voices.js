@@ -141,3 +141,14 @@ class Voices extends AudioWorkletProcessor {
 }
 
 registerProcessor("voices", Voices)
+
+// Records whatever reaches it (the microphone), handing it over block by block.
+class Tape extends AudioWorkletProcessor {
+	process(inputs) {
+		const channel = inputs[0][0]
+		if (channel) this.port.postMessage(channel.slice())
+		return true
+	}
+}
+
+registerProcessor("tape", Tape)
