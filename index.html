@@ -18,14 +18,20 @@
 			min-height: 100vh;
 			box-sizing: border-box;
 			padding: 8vmin;
+			display: grid;
+			align-content: center;
+			justify-items: center;
+			gap: 12vmin;
+			background: #141010;
+			color: #e8dcd8;
+			font: 700 1.2rem OpenDyslexic, sans-serif;
+			letter-spacing: 0.02em;
+		}
+		.sounds {
 			display: flex;
 			flex-wrap: wrap;
 			justify-content: center;
-			align-content: center;
 			gap: 8vmin;
-			background: #141010;
-			font: 700 1.2rem OpenDyslexic, sans-serif;
-			letter-spacing: 0.02em;
 		}
 		.sound {
 			display: grid;
@@ -44,15 +50,120 @@
 			background: radial-gradient(circle at 38% 32%, hsl(var(--hue) 100% 68%), hsl(var(--hue) 83% 46%) 45%, hsl(var(--hue) 89% 30%) 100%);
 			box-shadow: 0 1vmin 0 hsl(var(--hue) 94% 18%), 0 2vmin 4vmin rgba(0, 0, 0, 0.6), inset 0 -0.6vmin 2vmin rgba(0, 0, 0, 0.35);
 		}
+		.recent {
+			width: min(100%, 34rem);
+			font-size: 0.85rem;
+		}
+		.recent h2 {
+			margin: 0 0 1rem;
+			font-size: inherit;
+			letter-spacing: 0.12em;
+			color: #8a7d7a;
+		}
+		.recordings {
+			margin: 0;
+			padding: 0;
+			list-style: none;
+			display: grid;
+			gap: 0.6rem;
+		}
+		.recordings li {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.7rem;
+			padding: 0.6rem 0.8rem;
+			border-radius: 0.8rem;
+			background: #1d1717;
+		}
+		.when {
+			flex: 1;
+			color: #b3a5a1;
+		}
+		button, .save {
+			font: inherit;
+			letter-spacing: inherit;
+			color: inherit;
+			background: #2c2323;
+			border: none;
+			border-radius: 999px;
+			padding: 0.45rem 0.9rem;
+			cursor: pointer;
+			text-decoration: none;
+		}
+		.making {
+			border: none;
+			border-radius: 1.2rem;
+			padding: 2rem 2.4rem;
+			background: #1d1717;
+			color: inherit;
+		}
+		.making::backdrop {
+			background: rgba(0, 0, 0, 0.65);
+		}
+		.making form {
+			display: grid;
+			justify-items: center;
+			gap: 1.4rem;
+		}
+		.making input[name="name"] {
+			width: 12rem;
+			padding: 0.5rem 0.8rem;
+			border: 2px solid #3a2f2e;
+			border-radius: 0.6rem;
+			background: #141010;
+			color: inherit;
+			font: inherit;
+			text-align: center;
+			text-transform: uppercase;
+		}
+		/* The color, picked off a rainbow */
+		.making input[type="range"] {
+			appearance: none;
+			width: 14rem;
+			height: 0.8rem;
+			border-radius: 999px;
+			background: linear-gradient(to right, hsl(0 85% 50%), hsl(60 85% 50%), hsl(120 85% 50%), hsl(180 85% 50%), hsl(240 85% 50%), hsl(300 85% 50%), hsl(360 85% 50%));
+		}
+		.making input[type="range"]::-webkit-slider-thumb {
+			appearance: none;
+			width: 1.5rem;
+			aspect-ratio: 1;
+			border-radius: 50%;
+			background: #e8dcd8;
+		}
+		.making input[type="range"]::-moz-range-thumb {
+			width: 1.5rem;
+			height: 1.5rem;
+			border: none;
+			border-radius: 50%;
+			background: #e8dcd8;
+		}
+		.choices {
+			display: flex;
+			gap: 1rem;
+		}
 	</style>
 	<script src="sounds.js"></script>
+	<script src="saved.js"></script>
+	<script type="module" src="home.js"></script>
 </head>
 <body>
-	<script>
-		for (const { folder, name, hue } of SOUNDS) {
-			document.body.insertAdjacentHTML("beforeend", `<a class="sound" href="${folder}/" style="--hue: ${hue}">${name}</a>`)
-		}
-		navigator.serviceWorker?.register("sw.js")
-	</script>
+	<main class="sounds"></main>
+	<section class="recent" hidden>
+		<h2>RECENT</h2>
+		<ol class="recordings"></ol>
+	</section>
+	<template class="recording">
+		<li><button class="play" aria-label="Play">&#9654;</button><span class="when"></span><button class="make">MAKE A BUTTON</button><a class="save">SAVE</a></li>
+	</template>
+	<dialog class="making">
+		<form method="dialog">
+			<span class="sound preview"></span>
+			<input name="name" placeholder="NAME" maxlength="20" required autocomplete="off">
+			<input name="hue" type="range" min="0" max="359" aria-label="Color">
+			<div class="choices"><button value="cancel" formnovalidate>CANCEL</button><button value="make">MAKE</button></div>
+		</form>
+	</dialog>
 </body>
 </html>

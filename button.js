@@ -1,6 +1,8 @@
-// The button shared by every sound. Each sound's page sits in its own folder, named in sounds.js
-// (loaded by the page ahead of this), beside its sound.mp3
-const thisSound = SOUNDS.find(({ folder }) => folder === location.pathname.split("/").at(-2))
+// The button shared by every sound. Each sound's page sits in its own folder, beside its
+// sound.mp3. The page loads sounds.js, listing the built-in sounds, and saved.js, holding the
+// buttons made on this device, ahead of this
+const folder = location.pathname.split("/").at(-2)
+const thisSound = SOUNDS.find((sound) => sound.folder === folder) ?? await savedButton(folder)
 
 // Lets iPhones play it even with the ring/silent switch on silent
 if (navigator.audioSession) navigator.audioSession.type = "playback"
@@ -42,13 +44,13 @@ const TILT_DEGREES = 8
 // Number keys 1-8 play the call up a major scale, do to do, in semitones above as recorded
 const SCALE = [0, 2, 4, 5, 7, 9, 11, 12]
 // Key 0 cycles what the number keys play: the whole call, or just the part before or after the
-// sound's split. A sound you record yourself has no such parts, so then there is only the whole of it
+// sound's split. A sound recorded here has no such parts, so then there is only the whole of it
 const WHOLE = { from: 0, to: Infinity }
-let parts = [
+let parts = thisSound.split ? [
 	WHOLE,
 	{ from: 0, to: thisSound.split },
 	{ from: thisSound.split, to: Infinity },
-]
+] : [WHOLE]
 // Four anticlockwise turns of the knob unscrew the button, revealing a record button beneath
 const TURNS_TO_LIFT = 4
 const RECORD_LIMIT = 5 // seconds
@@ -318,7 +320,10 @@ function stopTaping() {
 	for (const track of microphone.getTracks()) track.stop()
 	microphone = null
 	const sound = trimmed(blocks)
-	if (sound) useSound(sound)
+	if (sound) {
+		useSound(sound)
+		saveRecording(sound, audio.sampleRate, thisSound.name)
+	}
 	slotBack()
 }
 
