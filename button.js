@@ -3,13 +3,15 @@
 // buttons made on this device, ahead of this
 
 // Opened by the home page's INSTALL: opening doesn't play the call, and the first press does
-// nothing but bring up the browser's offer to install (iPhones make no such offer)
+// nothing but bring up the browser's offer to install, which a word under the button points to
+// (iPhones make no such offer)
 const openedToInstall = new URLSearchParams(location.search).has("install")
 let installOffer = null
 if (openedToInstall) {
 	addEventListener("beforeinstallprompt", (event) => {
 		event.preventDefault()
 		installOffer = event
+		document.body.insertAdjacentHTML("beforeend", `<p class="install-hint">PRESS THE BUTTON TO INSTALL</p>`)
 	})
 }
 
@@ -21,11 +23,9 @@ if (navigator.audioSession) navigator.audioSession.type = "playback"
 
 document.body.style.setProperty("--hue", thisSound.hue)
 document.body.insertAdjacentHTML("afterbegin", `
-	<div class="socket"><button class="record" aria-label="Hold to record your own sound"><svg class="taken" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" pathLength="1"/></svg></button></div>
 	<button class="call" aria-label="Play the call"><span class="dial"><span class="dot" title="Drag to change pitch"></span></span><svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="49" pathLength="1"/><circle class="head" cx="99" cy="50" r="1.6"/></svg></button>
 `)
 const button = document.querySelector(".call")
-const record = document.querySelector(".record")
 const dial = document.querySelector(".dial")
 const dot = document.querySelector(".dot")
 const ring = document.querySelector(".ring")
@@ -63,9 +63,6 @@ let parts = thisSound.split ? [
 	{ from: 0, to: thisSound.split },
 	{ from: thisSound.split, to: Infinity },
 ] : [WHOLE]
-// Four anticlockwise turns of the knob unscrew the button, revealing a record button beneath
-const TURNS_TO_LIFT = 4
-const RECORD_LIMIT = 5 // seconds
 // Phones, while the button is held, measured from how the phone was held at the press: raising
 // the top edge turns the knob up, this many knob degrees per degree raised; rolling it a
 // quarter turn slows the call to a standstill, and a half turn plays it backwards
@@ -181,7 +178,7 @@ const knob = { shown: 0, target: 0, velocity: 0, spring: SPRINGS.step, moving: f
 function turnKnob(degrees, motion) {
 	hand = degrees
 	aimKnob()
-	loosen()
+	// loosen() // the unscrewing Easter egg, off for now (see below)
 	if (motion === "drag") {
 		knob.shown = knob.target
 		knob.velocity = 0
@@ -261,6 +258,18 @@ function centre() {
 	return { x: box.left + box.width / 2, y: box.top + box.height / 2, radius: box.width / 2 }
 }
 
+/* The unscrewing Easter egg, off for now, since recording has moved to the home page. Four
+   anticlockwise turns of the knob, in one go, unscrew the button: past halfway it rises and
+   swells, then pops off, revealing a record button for a sound of your own; let go of the knob
+   short of four turns and it screws back down. To bring it back, uncomment this and the call to
+   loosen() in turnKnob; the styles are still in button.css
+
+document.body.insertAdjacentHTML("afterbegin", `
+	<div class="socket"><button class="record" aria-label="Hold to record your own sound"><svg class="taken" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" pathLength="1"/></svg></button></div>
+`)
+const record = document.querySelector(".record")
+const TURNS_TO_LIFT = 4
+
 // Past halfway to unscrewed, the button starts to rise and swell, the only hint of what's below
 function loosen() {
 	const turns = hand / 360
@@ -310,11 +319,11 @@ record.addEventListener("pointerdown", (event) => {
 	const blocks = []
 	tape.port.onmessage = ({ data }) => blocks.push(data)
 	source.connect(tape).connect(silence).connect(audio.destination)
-	taping = { tape, source, blocks, started: performance.now(), limit: setTimeout(stopTaping, RECORD_LIMIT * 1000) }
+	taping = { tape, source, blocks, started: performance.now(), limit: setTimeout(stopTaping, LONGEST_SOUND * 1000) }
 	record.classList.add("recording")
 	requestAnimationFrame(function fill() {
 		if (!taping) return
-		record.style.setProperty("--taken", (performance.now() - taping.started) / 1000 / RECORD_LIMIT)
+		record.style.setProperty("--taken", (performance.now() - taping.started) / 1000 / LONGEST_SOUND)
 		requestAnimationFrame(fill)
 	})
 })
@@ -331,29 +340,12 @@ function stopTaping() {
 	record.style.setProperty("--taken", 0)
 	for (const track of microphone.getTracks()) track.stop()
 	microphone = null
-	const sound = trimmed(blocks)
+	const sound = trimmed(blocks, audio.sampleRate)
 	if (sound) {
 		useSound(sound)
 		saveRecording(sound, audio.sampleRate)
 	}
 	slotBack()
-}
-
-// The recording without the silence either side, so a press sounds at once, and brought up to
-// full volume, so a quiet recording still punches. Nothing worth keeping gives null
-function trimmed(blocks) {
-	const samples = new Float32Array(blocks.reduce((total, block) => total + block.length, 0))
-	let offset = 0
-	for (const block of blocks) {
-		samples.set(block, offset)
-		offset += block.length
-	}
-	const loudest = samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0)
-	if (loudest < 0.01) return null
-	const begins = Math.max(0, samples.findIndex((sample) => Math.abs(sample) > loudest * 0.05) - audio.sampleRate * 0.01)
-	const ends = Math.min(samples.length, samples.findLastIndex((sample) => Math.abs(sample) > loudest * 0.03) + audio.sampleRate * 0.05)
-	if (ends - begins < audio.sampleRate * 0.1) return null
-	return samples.slice(begins, ends).map((sample) => (sample / loudest) * 0.9)
 }
 
 async function useSound(samples) {
@@ -365,6 +357,7 @@ async function useSound(samples) {
 	parts = [WHOLE]
 	keyPart = 0
 }
+*/
 
 dot.addEventListener("pointerdown", (event) => {
 	// Grabbing the dot turns the knob instead of pressing the button
@@ -427,8 +420,8 @@ for (const release of ["pointerup", "pointercancel"]) {
 			rollSpeed = 1
 			restingRoll = null
 			steer()
-			// Unscrewing takes four turns in one go: let go short of that and the button screws back
-			// down. Whole turns drop off the knob unseen and unheard, a turn round being the same pitch
+			// Whole turns drop off the knob as it's let go, unseen and unheard (a turn round is the same
+			// pitch), so it swings home the short way, and an unscrewing not finished screws back down
 			const wholeTurns = hand - around(hand)
 			hand -= wholeTurns
 			knob.shown -= wholeTurns
@@ -569,6 +562,7 @@ button.addEventListener("click", () => {
 	if (!installOffer) return
 	installOffer.prompt()
 	installOffer = null
+	document.querySelector(".install-hint").remove()
 	history.replaceState(null, "", location.pathname)
 })
 // iPhones share motion only once the person allows it, which can only be asked on a tap

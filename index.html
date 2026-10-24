@@ -21,6 +21,8 @@
 			min-height: 100vh;
 			box-sizing: border-box;
 			padding: 8vmin;
+			/* Room for the bar pinned to the bottom */
+			padding-bottom: calc(8vmin + 4.5rem);
 			display: grid;
 			align-content: center;
 			justify-items: center;
@@ -157,15 +159,43 @@
 			font-size: 0.8rem;
 			color: hsl(3 90% 72%);
 		}
-		.adding {
+		.bar {
+			position: fixed;
+			left: 50%;
+			bottom: max(1.2rem, env(safe-area-inset-bottom));
+			translate: -50% 0;
 			display: flex;
-			flex-wrap: wrap;
-			justify-content: center;
+			align-items: center;
 			gap: 0.8rem;
-			font-size: 0.85rem;
+			font-size: 0.8rem;
+			white-space: nowrap;
 		}
-		.adding button {
+		.bar button {
 			color: #b3a5a1;
+		}
+		.divider {
+			width: 2px;
+			height: 1.6rem;
+			border-radius: 1px;
+			background: rgba(232, 220, 216, 0.12);
+		}
+		/* A studio's red dot, held to record. The ring round it fills with the time used (--taken) */
+		.record {
+			width: 2.8rem;
+			aspect-ratio: 1;
+			padding: 0;
+			border-radius: 50%;
+			background: radial-gradient(circle closest-side, hsl(3 85% 52%) 60%, transparent 63%), conic-gradient(hsl(3 90% 80%) calc(var(--taken, 0) * 360deg), #2c2323 0);
+			touch-action: none;
+			-webkit-touch-callout: none;
+		}
+		.record.recording {
+			animation: listening 0.8s ease-in-out infinite alternate;
+		}
+		@keyframes listening {
+			to {
+				box-shadow: 0 0 1.6rem hsl(3 90% 55% / 0.65);
+			}
 		}
 		/* Around the button pressed and held, or dragged off: its options on a faint ring, each at
 		   its own angle (--angle), the one dragged toward lit */
@@ -230,10 +260,14 @@
 	<template class="recording">
 		<li><button class="play" aria-label="Play">&#9654;</button><span class="when"></span><button class="promote">PROMOTE</button><button class="save">SAVE MP3</button><button class="bin" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button></li>
 	</template>
-	<nav class="adding">
-		<button class="from-file">ADD FROM FILE</button>
-		<button class="from-web">ADD FROM URL</button>
-		<input type="file" accept="audio/*" multiple hidden>
+	<!-- Pinned to the bottom: add a sound from a file, record one, or add one from the web -->
+	<nav class="bar">
+		<button class="from-file">ADD FILE</button>
+		<span class="divider"></span>
+		<button class="record" aria-label="Hold to record"></button>
+		<span class="divider"></span>
+		<button class="from-web">ADD URL</button>
+		<input type="file" accept="audio/*" hidden>
 	</nav>
 	<div class="radial" popover="manual"></div>
 	<!-- Naming a button and picking its color, to promote a sound or rename a button -->

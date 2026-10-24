@@ -1,6 +1,8 @@
 // Recordings and buttons made on this device, kept in its storage (IndexedDB) and shared by every
 // page and the service worker. None of it reaches the site: clearing the browser's data loses it
 const RECENT_LIMIT = 10
+// Recordings stop, and sounds added from files or the web are cut off, at this length
+const LONGEST_SOUND = 20 // seconds
 
 function saved(storeName, mode, work) {
 	return new Promise((resolve, reject) => {
@@ -19,12 +21,11 @@ function saved(storeName, mode, work) {
 	})
 }
 
-// name: only for sounds added from a file or the web, or demoted from a button; recordings made
-// here go by when they were made
-function saveRecording(samples, sampleRate, name) {
+// Recordings go by when they were made; only sounds demoted from buttons have names
+function saveRecording(samples, sampleRate) {
 	// Asks the browser not to clear the site's storage when the device runs short of space
 	navigator.storage?.persist()
-	return keepRecording({ sound: wav(samples, sampleRate), name, at: Date.now() })
+	return keepRecording({ sound: wav(samples, sampleRate), at: Date.now() })
 }
 
 // Into the recent list, which holds only the latest few
@@ -42,10 +43,15 @@ function deleteRecording(id) {
 	return saved("recordings", "readwrite", (recordings) => recordings.delete(id))
 }
 
+// sound: a WAV, like a recording's
+function addButton(sound, name, hue) {
+	const id = crypto.randomUUID().slice(0, 8)
+	return saved("buttons", "readwrite", (buttons) => buttons.add({ id, name: name.toUpperCase(), hue, sound }))
+}
+
 // A recording becomes a button, leaving the recent list
 async function promote(recording, name, hue) {
-	const id = crypto.randomUUID().slice(0, 8)
-	await saved("buttons", "readwrite", (buttons) => buttons.add({ id, name: name.toUpperCase(), hue, sound: recording.sound }))
+	await addButton(recording.sound, name, hue)
 	await deleteRecording(recording.id)
 }
 
@@ -65,6 +71,23 @@ function savedButtons() {
 
 function savedButton(id) {
 	return saved("buttons", "readonly", (buttons) => buttons.get(id))
+}
+
+// A recording, from its blocks, without the silence either side, so a press sounds at once, and brought up to
+// full volume, so a quiet recording still punches. Nothing worth keeping gives null
+function trimmed(blocks, sampleRate) {
+	const samples = new Float32Array(blocks.reduce((total, block) => total + block.length, 0))
+	let offset = 0
+	for (const block of blocks) {
+		samples.set(block, offset)
+		offset += block.length
+	}
+	const loudest = samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0)
+	if (loudest < 0.01) return null
+	const begins = Math.max(0, samples.findIndex((sample) => Math.abs(sample) > loudest * 0.05) - sampleRate * 0.01)
+	const ends = Math.min(samples.length, samples.findLastIndex((sample) => Math.abs(sample) > loudest * 0.03) + sampleRate * 0.05)
+	if (ends - begins < sampleRate * 0.1) return null
+	return samples.slice(begins, ends).map((sample) => (sample / loudest) * 0.9)
 }
 
 // Mono, 16-bit

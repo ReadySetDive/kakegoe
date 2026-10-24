@@ -1,3 +1,8 @@
+@font-face {
+	font-family: OpenDyslexic;
+	font-weight: 700;
+	src: url(fonts/OpenDyslexic-Bold.woff);
+}
 html, body {
 	margin: 0;
 	height: 100%;
@@ -56,7 +61,8 @@ body > * {
 .call.landing {
 	transition: transform 0.7s cubic-bezier(0.2, 1.4, 0.4, 1), opacity 0.2s;
 }
-/* Under the button: a dark recess holding a record button, red whatever the button's color */
+/* Under the button: a dark recess holding a record button, red whatever the button's color. For
+   the unscrewing Easter egg, off for now (see button.js) */
 .socket {
 	width: min(62vmin, 340px);
 	aspect-ratio: 1;
@@ -187,4 +193,16 @@ body > * {
 }
 .ring.scrubbing .head {
 	r: 2.6;
+}
+/* Opened to be installed: a word under the button saying how */
+.install-hint {
+	z-index: 1;
+	align-self: center;
+	translate: 0 calc(min(31vmin, 170px) + 5rem);
+	width: 11em;
+	margin: 0;
+	text-align: center;
+	font: 700 1.1rem OpenDyslexic, sans-serif;
+	letter-spacing: 0.04em;
+	color: hsl(var(--hue) 70% 82%);
 }

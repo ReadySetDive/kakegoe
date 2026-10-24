@@ -1,6 +1,6 @@
-// The home page: every button, built in (sounds.js) and promoted on this device (saved.js), then
-// the recent sounds, recorded on any button or added from a file or the web, to play, save,
-// promote to a button of their own, or bin
+// The home page: every button, built in (sounds.js) and made on this device (saved.js), then the
+// recent recordings, to play, save, promote to a button of their own, or bin; and pinned to the
+// bottom, the ways to make sounds: adding one from a file or the web, or recording one
 navigator.serviceWorker?.register("sw.js")
 
 const sounds = document.querySelector(".sounds")
@@ -12,7 +12,7 @@ const preview = naming.querySelector(".preview")
 const fetching = document.querySelector(".fetching")
 const fetchingForm = fetching.querySelector("form")
 const problem = fetching.querySelector(".problem")
-const fileInput = document.querySelector(".adding input[type=file]")
+const fileInput = document.querySelector(".bar input[type=file]")
 const radial = document.querySelector(".radial")
 // Pressing and holding a button, or dragging off it, opens a radial selector of things to do with it
 const LONG_PRESS = 500 // ms
@@ -94,23 +94,26 @@ async function mp3(wav) {
 	return new Blob(frames, { type: "audio/mpeg" })
 }
 
-// A sound from a file or the web joins the recent sounds, named after where it came from. It's
-// copied in, as a recording is, so it plays the same way and needs neither the file nor the web again
-async function addSound(sound, source) {
+// A sound from a file or the web becomes a button straight away, once named and colored. It's
+// checked by playing it through, then copied in, mono and at most LONGEST_SOUND long, as a WAV
+// like a recording's: the button needs neither the file nor the web again
+async function addFrom(sound, source) {
 	const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(await sound.arrayBuffer())
-	const mono = new Float32Array(decoded.length)
+	const length = Math.min(decoded.length, LONGEST_SOUND * decoded.sampleRate)
+	const mono = new Float32Array(length)
 	for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
-		decoded.getChannelData(channel).forEach((sample, index) => mono[index] += sample / decoded.numberOfChannels)
+		decoded.getChannelData(channel).subarray(0, length).forEach((sample, index) => mono[index] += sample / decoded.numberOfChannels)
 	}
-	const name = decodeURIComponent(source.split("/").at(-1)).replace(/\.[^.]*$/, "").toUpperCase()
-	await saveRecording(mono, decoded.sampleRate, name)
-	show()
+	const copy = wav(mono, decoded.sampleRate)
+	const name = decodeURIComponent(source.split("/").at(-1)).replace(/\.[^.]*$/, "")
+	startNaming("ADD", name, Math.floor(Math.random() * 360), (name, hue) => addButton(copy, name, hue))
 }
 
 document.querySelector(".from-file").addEventListener("click", () => fileInput.click())
 fileInput.addEventListener("change", async () => {
-	for (const file of fileInput.files) await addSound(file, file.name)
+	const [file] = fileInput.files
 	fileInput.value = ""
+	await addFrom(file, file.name).catch(() => alert("That file isn't a sound this browser can play."))
 })
 
 document.querySelector(".from-web").addEventListener("click", () => {
@@ -125,14 +128,76 @@ fetchingForm.addEventListener("submit", async (event) => {
 	// Sites must allow other sites to use their files; many sound sites don't
 	const response = await fetch(url).catch(() => null)
 	if (!response?.ok) return explain(response ? "Nothing to be found at that address." : "That site won't let other sites use its sounds. Download it, then add it from a file.")
-	await addSound(await response.blob(), new URL(url).pathname)
-		.then(() => fetching.close())
-		.catch(() => explain("That isn't a sound this browser can play."))
+	const sound = await response.blob()
+	fetching.close()
+	await addFrom(sound, new URL(url).pathname).catch(() => {
+		fetching.showModal()
+		explain("That isn't a sound this browser can play.")
+	})
 })
 
 function explain(trouble) {
 	problem.textContent = trouble
 	problem.hidden = false
+}
+
+// Press and hold the red dot to record, up to LONGEST_SOUND. The microphone is taped block by
+// block (the "tape" processor in voices.js); a silent gain keeps the tape in the audio graph so
+// it runs. The recording joins the recent sounds
+const recorder = document.querySelector(".record")
+let audio = null
+let taperLoaded = null
+let holdingRecorder = false
+let taping = null
+
+recorder.addEventListener("pointerdown", async (event) => {
+	event.preventDefault()
+	recorder.setPointerCapture(event.pointerId)
+	holdingRecorder = true
+	// Made on a press, since browsers only allow sound, and so microphones, after one
+	audio ??= new AudioContext()
+	taperLoaded ??= audio.audioWorklet.addModule("voices.js")
+	await taperLoaded
+	const microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }).catch(() => null)
+	// Asked for the microphone the first time, the press may be over before it's allowed
+	if (!holdingRecorder) for (const track of microphone?.getTracks() ?? []) track.stop()
+	if (!microphone || !holdingRecorder) return
+	const tape = new AudioWorkletNode(audio, "tape")
+	const source = audio.createMediaStreamSource(microphone)
+	const silence = new GainNode(audio, { gain: 0 })
+	const blocks = []
+	tape.port.onmessage = ({ data }) => blocks.push(data)
+	source.connect(tape).connect(silence).connect(audio.destination)
+	taping = { microphone, tape, source, blocks, started: performance.now(), limit: setTimeout(stopTaping, LONGEST_SOUND * 1000) }
+	recorder.classList.add("recording")
+	requestAnimationFrame(function fill() {
+		if (!taping) return
+		recorder.style.setProperty("--taken", (performance.now() - taping.started) / 1000 / LONGEST_SOUND)
+		requestAnimationFrame(fill)
+	})
+})
+for (const release of ["pointerup", "pointercancel"]) {
+	recorder.addEventListener(release, () => {
+		holdingRecorder = false
+		stopTaping()
+	})
+}
+recorder.addEventListener("contextmenu", (event) => event.preventDefault())
+
+async function stopTaping() {
+	if (!taping) return
+	const { microphone, tape, source, blocks, limit } = taping
+	taping = null
+	clearTimeout(limit)
+	source.disconnect()
+	tape.disconnect()
+	for (const track of microphone.getTracks()) track.stop()
+	recorder.classList.remove("recording")
+	recorder.style.setProperty("--taken", 0)
+	const sound = trimmed(blocks, audio.sampleRate)
+	if (!sound) return
+	await saveRecording(sound, audio.sampleRate)
+	show()
 }
 
 // Options sit around the button at an angle: 0 degrees is to its right, -90 straight up
