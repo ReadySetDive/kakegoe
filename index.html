@@ -40,6 +40,10 @@
 			color: hsl(var(--hue) 70% 82%);
 			text-decoration: none;
 			-webkit-tap-highlight-color: transparent;
+			/* Pressing and holding opens this page's own menu, not the phone's or a text selection */
+			-webkit-touch-callout: none;
+			-webkit-user-select: none;
+			user-select: none;
 		}
 		/* A small copy of the sound's button, in its color */
 		.sound::before {
@@ -91,22 +95,22 @@
 			cursor: pointer;
 			text-decoration: none;
 		}
-		.making {
+		.promoting {
 			border: none;
 			border-radius: 1.2rem;
 			padding: 2rem 2.4rem;
 			background: #1d1717;
 			color: inherit;
 		}
-		.making::backdrop {
+		.promoting::backdrop {
 			background: rgba(0, 0, 0, 0.65);
 		}
-		.making form {
+		.promoting form {
 			display: grid;
 			justify-items: center;
 			gap: 1.4rem;
 		}
-		.making input[name="name"] {
+		.promoting input[name="name"] {
 			width: 12rem;
 			padding: 0.5rem 0.8rem;
 			border: 2px solid #3a2f2e;
@@ -118,26 +122,49 @@
 			text-transform: uppercase;
 		}
 		/* The color, picked off a rainbow */
-		.making input[type="range"] {
+		.promoting input[type="range"] {
 			appearance: none;
 			width: 14rem;
 			height: 0.8rem;
 			border-radius: 999px;
 			background: linear-gradient(to right, hsl(0 85% 50%), hsl(60 85% 50%), hsl(120 85% 50%), hsl(180 85% 50%), hsl(240 85% 50%), hsl(300 85% 50%), hsl(360 85% 50%));
 		}
-		.making input[type="range"]::-webkit-slider-thumb {
+		.promoting input[type="range"]::-webkit-slider-thumb {
 			appearance: none;
 			width: 1.5rem;
 			aspect-ratio: 1;
 			border-radius: 50%;
 			background: #e8dcd8;
 		}
-		.making input[type="range"]::-moz-range-thumb {
+		.promoting input[type="range"]::-moz-range-thumb {
 			width: 1.5rem;
 			height: 1.5rem;
 			border: none;
 			border-radius: 50%;
 			background: #e8dcd8;
+		}
+		/* Under the button pressed and held */
+		.menu {
+			inset: auto;
+			margin: 0;
+			translate: -50% 0;
+			padding: 0.4rem;
+			border: none;
+			border-radius: 999px;
+			background: #1d1717;
+			color: inherit;
+			box-shadow: 0 1vmin 4vmin rgba(0, 0, 0, 0.6);
+		}
+		/* A bin: deleting a recording is for good */
+		.bin {
+			display: grid;
+			place-items: center;
+			padding: 0.45rem 0.6rem;
+			color: hsl(3 90% 72%);
+		}
+		.bin svg {
+			width: 1.1em;
+			height: 1.1em;
 		}
 		.choices {
 			display: flex;
@@ -155,14 +182,17 @@
 		<ol class="recordings"></ol>
 	</section>
 	<template class="recording">
-		<li><button class="play" aria-label="Play">&#9654;</button><span class="when"></span><button class="make">MAKE A BUTTON</button><a class="save">SAVE</a></li>
+		<li><button class="play" aria-label="Play">&#9654;</button><span class="when"></span><button class="promote">PROMOTE</button><a class="save">SAVE</a><button class="bin" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button></li>
 	</template>
-	<dialog class="making">
+	<div class="menu" popover="manual">
+		<button class="demote">DEMOTE</button>
+	</div>
+	<dialog class="promoting">
 		<form method="dialog">
 			<span class="sound preview"></span>
 			<input name="name" placeholder="NAME" maxlength="20" required autocomplete="off">
 			<input name="hue" type="range" min="0" max="359" aria-label="Color">
-			<div class="choices"><button value="cancel" formnovalidate>CANCEL</button><button value="make">MAKE</button></div>
+			<div class="choices"><button value="cancel" formnovalidate>CANCEL</button><button value="promote">PROMOTE</button></div>
 		</form>
 	</dialog>
 </body>

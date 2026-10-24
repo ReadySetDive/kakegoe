@@ -20,13 +20,16 @@ function saved(storeName, mode, work) {
 }
 
 // recordedOn: the name of the button it was recorded on
-async function saveRecording(samples, sampleRate, recordedOn) {
+function saveRecording(samples, sampleRate, recordedOn) {
 	// Asks the browser not to clear the site's storage when the device runs short of space
 	navigator.storage?.persist()
-	await saved("recordings", "readwrite", (recordings) => recordings.add({ sound: wav(samples, sampleRate), recordedOn, at: Date.now() }))
-	for (const old of (await recentRecordings()).slice(RECENT_LIMIT)) {
-		await saved("recordings", "readwrite", (recordings) => recordings.delete(old.id))
-	}
+	return keepRecording({ sound: wav(samples, sampleRate), recordedOn, at: Date.now() })
+}
+
+// Into the recent list, which holds only the latest few
+async function keepRecording(recording) {
+	await saved("recordings", "readwrite", (recordings) => recordings.add(recording))
+	for (const old of (await recentRecordings()).slice(RECENT_LIMIT)) await deleteRecording(old.id)
 }
 
 // Newest first
@@ -34,11 +37,21 @@ async function recentRecordings() {
 	return (await saved("recordings", "readonly", (recordings) => recordings.getAll())).reverse()
 }
 
-// The button keeps its own copy of the sound, so it outlives the recording leaving the recent list
-async function makeButton(recording, name, hue) {
+function deleteRecording(id) {
+	return saved("recordings", "readwrite", (recordings) => recordings.delete(id))
+}
+
+// A recording becomes a button, leaving the recent list
+async function promote(recording, name, hue) {
 	const id = crypto.randomUUID().slice(0, 8)
 	await saved("buttons", "readwrite", (buttons) => buttons.add({ id, name: name.toUpperCase(), hue, sound: recording.sound }))
-	return id
+	await deleteRecording(recording.id)
+}
+
+// A button goes back to being a recording, the newest, named after the button
+async function demote(button) {
+	await keepRecording({ sound: button.sound, recordedOn: button.name, at: Date.now() })
+	await saved("buttons", "readwrite", (buttons) => buttons.delete(button.id))
 }
 
 function savedButtons() {

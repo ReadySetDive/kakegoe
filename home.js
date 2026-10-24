@@ -1,12 +1,26 @@
-// The home page: every button, built in (sounds.js) and made on this device (saved.js), then the
-// recent recordings from any button, each of which can become a button of its own
+// The home page: every button, built in (sounds.js) and promoted on this device (saved.js), then
+// the recent recordings from any button, to play, save, promote to a button of their own, or bin
 navigator.serviceWorker?.register("sw.js")
 
 const sounds = document.querySelector(".sounds")
 const recent = document.querySelector(".recent")
-const making = document.querySelector(".making")
-const form = making.querySelector("form")
-const preview = making.querySelector(".preview")
+const recordingsList = recent.querySelector(".recordings")
+const promoting = document.querySelector(".promoting")
+const form = promoting.querySelector("form")
+const preview = promoting.querySelector(".preview")
+const menu = document.querySelector(".menu")
+const LONG_PRESS = 500 // ms
+
+// Drawn afresh whenever a recording or button moves between the two
+async function show() {
+	sounds.replaceChildren()
+	for (const { folder, name, hue } of SOUNDS) showButton(`${folder}/`, name, hue)
+	// Served by the service worker rather than the site (see sw.js)
+	for (const button of await savedButtons()) offerMenu(showButton(`custom/${button.id}/`, button.name, button.hue), button)
+	const recordings = await recentRecordings()
+	recent.hidden = recordings.length === 0
+	recordingsList.replaceChildren(...recordings.map(recordingRow))
+}
 
 function showButton(href, name, hue) {
 	const link = document.createElement("a")
@@ -15,36 +29,80 @@ function showButton(href, name, hue) {
 	link.style.setProperty("--hue", hue)
 	link.textContent = name
 	sounds.append(link)
+	return link
 }
-for (const { folder, name, hue } of SOUNDS) showButton(`${folder}/`, name, hue)
-// Made on this device, so served by the service worker rather than the site (see sw.js)
-for (const { id, name, hue } of await savedButtons()) showButton(`custom/${id}/`, name, hue)
 
-const recordings = await recentRecordings()
-recent.hidden = recordings.length === 0
-for (const recording of recordings) {
+function recordingRow(recording) {
 	const row = document.querySelector("template.recording").content.firstElementChild.cloneNode(true)
 	const sound = URL.createObjectURL(recording.sound)
 	const when = new Date(recording.at)
 	row.querySelector(".when").textContent = `${recording.recordedOn} · ${when.toLocaleString([], { dateStyle: "short", timeStyle: "short" })}`
 	row.querySelector(".play").addEventListener("click", () => new Audio(sound).play())
-	row.querySelector(".make").addEventListener("click", () => startMaking(recording))
+	row.querySelector(".promote").addEventListener("click", () => startPromoting(recording))
 	const save = row.querySelector(".save")
 	save.href = sound
 	// The Swedish style of date is the sortable one: 2026-10-24 11:52:03
 	save.download = `${recording.recordedOn} ${when.toLocaleString("sv-SE").replaceAll(":", ".")}.wav`
-	recent.querySelector(".recordings").append(row)
+	row.querySelector(".bin").addEventListener("click", async () => {
+		await deleteRecording(recording.id)
+		show()
+	})
+	return row
 }
 
-let makingFrom = null
+// Only promoted buttons have a menu, opened by pressing and holding one (or right-clicking it)
+function offerMenu(link, button) {
+	let holding
+	let heldLong = false
+	link.addEventListener("pointerdown", () => {
+		heldLong = false
+		holding = setTimeout(() => {
+			heldLong = true
+			openMenu(link, button)
+		}, LONG_PRESS)
+	})
+	for (const end of ["pointerup", "pointerleave", "pointercancel"]) link.addEventListener(end, () => clearTimeout(holding))
+	// A long press opens the menu, not the button
+	link.addEventListener("click", (event) => heldLong && event.preventDefault())
+	// Phones' own long-press menus give way to this one
+	link.addEventListener("contextmenu", (event) => {
+		event.preventDefault()
+		openMenu(link, button)
+	})
+}
 
-function startMaking(recording) {
-	makingFrom = recording
+let menuFor = null
+
+// Android fires its long press as a contextmenu too, so this can be asked twice for one press
+function openMenu(link, button) {
+	if (menu.matches(":popover-open")) return
+	menuFor = button
+	const box = link.getBoundingClientRect()
+	menu.style.left = `${box.left + box.width / 2}px`
+	menu.style.top = `${box.bottom + 12}px`
+	menu.showPopover()
+}
+
+// Closed by hand rather than by the browser, which would close it as the long press that opened
+// it is let go: a press anywhere else closes it, as does Escape
+addEventListener("pointerdown", (event) => menu.contains(event.target) || menu.hidePopover())
+addEventListener("keydown", (event) => event.key === "Escape" && menu.hidePopover())
+
+menu.querySelector(".demote").addEventListener("click", async () => {
+	menu.hidePopover()
+	await demote(menuFor)
+	show()
+})
+
+let promotingFrom = null
+
+function startPromoting(recording) {
+	promotingFrom = recording
 	form.reset()
 	form.elements.hue.value = Math.floor(Math.random() * 360)
 	showPreview()
-	making.returnValue = ""
-	making.showModal()
+	promoting.returnValue = ""
+	promoting.showModal()
 }
 
 function showPreview() {
@@ -54,10 +112,10 @@ function showPreview() {
 }
 form.addEventListener("input", showPreview)
 
-making.addEventListener("close", async () => {
-	if (making.returnValue !== "make") return
-	const id = await makeButton(makingFrom, form.elements.name.value, Number(form.elements.hue.value))
-	// Straight to the new button, ready to install
-	await navigator.serviceWorker.ready
-	location.href = `custom/${id}/`
+promoting.addEventListener("close", async () => {
+	if (promoting.returnValue !== "promote") return
+	await promote(promotingFrom, form.elements.name.value, Number(form.elements.hue.value))
+	show()
 })
+
+show()
