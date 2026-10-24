@@ -78,7 +78,7 @@
 	</style>
 </head>
 <body>
-	<button aria-label="Yoooo! (play the call)"><span class="dial"><span class="dot" title="Drag to change pitch; double-click to reset"></span></span></button>
+	<button aria-label="Yoooo! (play the call)"><span class="dial"><span class="dot" title="Drag to change pitch"></span></span></button>
 	<script type="module">
 		// Lets iPhones play it even with the ring/silent switch on silent
 		if (navigator.audioSession) navigator.audioSession.type = "playback"
@@ -132,10 +132,6 @@
 			const x = event.clientX - (centre.left + centre.width / 2)
 			const y = event.clientY - (centre.top + centre.height / 2)
 			turnKnob(Math.atan2(-y, x) * 180 / Math.PI)
-		})
-		dot.addEventListener("dblclick", (event) => {
-			event.stopPropagation()
-			turnKnob(0)
 		})
 
 		// On press rather than click: the sound starts the instant a finger lands
