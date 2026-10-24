@@ -12,6 +12,7 @@ const FILES = [
 	"maskable-512.png",
 	"apple-touch-icon.png",
 	"home.js",
+	"transcribe.js",
 	"sounds.js",
 	"saved.js",
 	"icons.js",
@@ -44,8 +45,9 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
 	event.waitUntil((async () => {
 		// Earlier versions served stale copies forever from caches with other names; when replacing
-		// one, reload its open windows so they pick up the current site straight away
-		const stale = (await caches.keys()).filter((name) => name !== CACHE)
+		// one, reload its open windows so they pick up the current site straight away. The speech
+		// model's cache (see transcribe.js) is kept: it's large, and changes with no version here
+		const stale = (await caches.keys()).filter((name) => name !== CACHE && name !== "transformers-cache")
 		await Promise.all(stale.map((name) => caches.delete(name)))
 		await self.clients.claim()
 		if (stale.length) {

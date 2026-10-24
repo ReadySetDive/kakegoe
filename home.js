@@ -74,9 +74,11 @@ function recordingRow(recording) {
 	return row
 }
 
-// Recordings are kept as WAVs (see saved.js), made into MP3s by lamejs, fetched only when wanted
+// Saving makes an MP3 of a sound, whatever it was kept as (a recording is a WAV, see saved.js),
+// with lamejs, fetched only when first wanted
 let encoder = null
-async function mp3(wav) {
+async function mp3(sound) {
+	if (sound.type === "audio/mpeg") return sound
 	encoder ??= new Promise((resolve, reject) => {
 		const script = document.createElement("script")
 		script.src = "vendor/lame.min.js"
@@ -85,9 +87,9 @@ async function mp3(wav) {
 		document.head.append(script)
 	})
 	await encoder
-	const sampleRate = new DataView(await wav.slice(24, 28).arrayBuffer()).getUint32(0, true)
-	const samples = new Int16Array(await wav.slice(44).arrayBuffer())
-	const encoding = new lamejs.Mp3Encoder(1, sampleRate, 128)
+	const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(await sound.arrayBuffer())
+	const samples = Int16Array.from(mono(decoded), (sample) => Math.max(-1, Math.min(1, sample)) * 0x7fff)
+	const encoding = new lamejs.Mp3Encoder(1, decoded.sampleRate, 128)
 	const frames = []
 	// lamejs takes the samples an MP3 frame at a time
 	for (let start = 0; start < samples.length; start += 1152) frames.push(encoding.encodeBuffer(samples.subarray(start, start + 1152)))
@@ -96,17 +98,21 @@ async function mp3(wav) {
 }
 
 // A sound from a file or the web becomes a button straight away, once named and colored. It's
-// checked by playing it through, then copied in, mono and at most LONGEST_SOUND long, as a WAV
-// like a recording's: the button needs neither the file nor the web again
+// checked by decoding it, then copied in, so the button needs neither the file nor the web
+// again: as it came, or, when longer than LONGEST_SOUND, just its start, as a WAV
 async function addFrom(sound, source) {
 	const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(await sound.arrayBuffer())
-	const length = Math.min(decoded.length, LONGEST_SOUND * decoded.sampleRate)
-	const mono = new Float32Array(length)
-	for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
-		decoded.getChannelData(channel).subarray(0, length).forEach((sample, index) => mono[index] += sample / decoded.numberOfChannels)
-	}
-	const copy = wav(mono, decoded.sampleRate)
+	const copy = decoded.duration <= LONGEST_SOUND ? sound : wav(mono(decoded, LONGEST_SOUND * decoded.sampleRate), decoded.sampleRate)
 	startNaming("ADD", nameOf(source), Math.floor(Math.random() * 360), (name, hue) => addButton(copy, name, hue))
+}
+
+// A decoded sound's channels mixed into one, up to length samples long
+function mono(decoded, length = decoded.length) {
+	const mixed = new Float32Array(Math.min(length, decoded.length))
+	for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
+		decoded.getChannelData(channel).subarray(0, mixed.length).forEach((sample, index) => mixed[index] += sample / decoded.numberOfChannels)
+	}
+	return mixed
 }
 
 // A file's name, from its path, without its extension
@@ -212,7 +218,7 @@ function foundRow(address) {
 		}
 	})
 	add.addEventListener("click", async () => {
-		if (add.classList.contains("too-long")) return explain(`That one's too long: sounds can be ${LONGEST_SOUND} seconds at most.`)
+		if (add.classList.contains("too-long")) return explain(`That one's too long: sounds can be ${LONGEST_SOUND / 60} minutes at most.`)
 		problem.hidden = true
 		const { response, at } = await fetchFromWeb(address).catch(() => ({}))
 		if (!response?.ok) return explain("Couldn't fetch that sound.")
@@ -238,6 +244,7 @@ let taping = null
 recorder.addEventListener("pointerdown", async (event) => {
 	event.preventDefault()
 	recorder.setPointerCapture(event.pointerId)
+	recorder.classList.add("pressed")
 	holdingRecorder = true
 	// Made on a press, since browsers only allow sound, and so microphones, after one
 	audio ??= new AudioContext()
@@ -263,6 +270,7 @@ recorder.addEventListener("pointerdown", async (event) => {
 })
 for (const release of ["pointerup", "pointercancel"]) {
 	recorder.addEventListener(release, () => {
+		recorder.classList.remove("pressed")
 		holdingRecorder = false
 		stopTaping()
 	})
@@ -281,8 +289,60 @@ async function stopTaping() {
 	recorder.style.setProperty("--taken", 0)
 	const sound = trimmed(blocks, audio.sampleRate)
 	if (!sound) return
-	await saveRecording(sound, audio.sampleRate)
+	const id = await saveRecording(sound, audio.sampleRate)
 	show()
+	nameByWords(id, sound, audio.sampleRate)
+}
+
+// A recording is named by what's said in it, worked out on this device (transcribe.js), once
+// it's in the recent list. A sound that isn't speech goes on by its time
+let transcriber = null
+const hearing = new Map() // recording id -> what to do with what's heard in it
+
+async function nameByWords(id, samples, sampleRate) {
+	if (!transcriber) {
+		transcriber = new Worker("transcribe.js", { type: "module" })
+		transcriber.onmessage = ({ data }) => {
+			hearing.get(data.id)(data.text)
+			hearing.delete(data.id)
+		}
+	}
+	const speech = await at16k(samples, sampleRate)
+	const text = await new Promise((resolve) => {
+		hearing.set(id, resolve)
+		transcriber.postMessage({ id, samples: speech })
+	})
+	const name = nameFrom(text)
+	if (!name) return
+	await nameRecording(id, name)
+	show()
+}
+
+// Whisper listens at 16 kHz, 30 seconds at a time: the start is enough to name a sound by
+async function at16k(samples, sampleRate) {
+	const start = samples.subarray(0, 30 * sampleRate)
+	const context = new OfflineAudioContext(1, Math.ceil(start.length * 16000 / sampleRate), 16000)
+	const buffer = context.createBuffer(1, start.length, sampleRate)
+	buffer.copyToChannel(start, 0)
+	const source = new AudioBufferSourceNode(context, { buffer })
+	source.connect(context.destination)
+	source.start()
+	return (await context.startRendering()).getChannelData(0)
+}
+
+// What was said, as a name: capitals, cut between words to fit the naming dialog. Whisper hears
+// sounds that aren't speech as stock phrases, or describes them in brackets
+const LONGEST_NAME = 20 // letters
+const NOT_SPEECH = ["YOU", "THANK YOU", "THANKS FOR WATCHING", "BYE"]
+function nameFrom(text) {
+	const said = text.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/\s+/g, " ").trim().toUpperCase()
+	if (!/\p{L}{2}/u.test(said) || NOT_SPEECH.includes(said)) return null
+	let name = ""
+	for (const word of said.split(" ")) {
+		if (`${name} ${word}`.trim().length > LONGEST_NAME) break
+		name = `${name} ${word}`.trim()
+	}
+	return name || said.slice(0, LONGEST_NAME)
 }
 
 // The wheel's options, each with the picture in its slice (24 px square, drawn in strokes)

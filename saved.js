@@ -1,8 +1,9 @@
 // Recordings and buttons made on this device, kept in its storage (IndexedDB) and shared by every
 // page and the service worker. None of it reaches the site: clearing the browser's data loses it
 const RECENT_LIMIT = 10
-// Recordings stop, and sounds added from files or the web are cut off, at this length
-const LONGEST_SOUND = 20 // seconds
+// Recordings stop, and sounds added from files or the web are cut off, at this length. Much
+// longer, and phones run short of memory, since a button holds its whole sound decoded
+const LONGEST_SOUND = 180 // seconds
 
 function saved(storeName, mode, work) {
 	return new Promise((resolve, reject) => {
@@ -21,17 +22,24 @@ function saved(storeName, mode, work) {
 	})
 }
 
-// Recordings go by when they were made; only sounds demoted from buttons have names
+// Recordings go by when they were made, until named by what's said in them (see home.js)
 function saveRecording(samples, sampleRate) {
 	// Asks the browser not to clear the site's storage when the device runs short of space
 	navigator.storage?.persist()
 	return keepRecording({ sound: wav(samples, sampleRate), at: Date.now() })
 }
 
-// Into the recent list, which holds only the latest few
+// Into the recent list, which holds only the latest few. Gives the recording's id
 async function keepRecording(recording) {
-	await saved("recordings", "readwrite", (recordings) => recordings.add(recording))
+	const id = await saved("recordings", "readwrite", (recordings) => recordings.add(recording))
 	for (const old of (await recentRecordings()).slice(RECENT_LIMIT)) await deleteRecording(old.id)
+	return id
+}
+
+// Unless it's been promoted or binned meanwhile
+async function nameRecording(id, name) {
+	const recording = await saved("recordings", "readonly", (recordings) => recordings.get(id))
+	if (recording) await saved("recordings", "readwrite", (recordings) => recordings.put({ ...recording, name }))
 }
 
 // Newest first

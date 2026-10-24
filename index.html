@@ -110,6 +110,7 @@
 			padding: 0.45rem 0.9rem;
 			cursor: pointer;
 			text-decoration: none;
+			-webkit-tap-highlight-color: transparent;
 		}
 		dialog {
 			border: none;
@@ -249,8 +250,15 @@
 			padding: 0;
 			border-radius: 50%;
 			background: radial-gradient(circle closest-side, hsl(3 85% 52%) 60%, #2c2323 63%);
+			outline: none;
 			touch-action: none;
 			-webkit-touch-callout: none;
+			/* Pressed, it sinks in; let go, it springs back with a little overshoot, like the buttons */
+			transition: scale 0.35s cubic-bezier(0.3, 1.6, 0.5, 1);
+		}
+		.record.pressed {
+			scale: 0.92;
+			transition: scale 60ms;
 		}
 		/* While recording, an arc over the dot, wide enough to show round a thumb (four of the dot's
 		   radii out), fills from left to right with the time used (--taken). It passes behind the
