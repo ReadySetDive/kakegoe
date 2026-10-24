@@ -13,23 +13,24 @@ const fetching = document.querySelector(".fetching")
 const fetchingForm = fetching.querySelector("form")
 const problem = fetching.querySelector(".problem")
 const fileInput = document.querySelector(".bar input[type=file]")
-const radial = document.querySelector(".radial")
-// Pressing and holding a button, or dragging off it, opens a radial selector of things to do with it
-const LONG_PRESS = 500 // ms
-const DRAG_TO_OPEN = 20 // px from the press
-const DRAG_TO_CHOOSE = 40 // px from the press, toward an option
-const AIM = 60 // degrees either side of an option that still choose it
+const wheel = document.querySelector(".wheel")
+// Pressing and holding a button, or dragging off it, opens a wheel of things to do with it
+const LONG_PRESS = 250 // ms
+const RING_WIDTH = 64 // px
+const SLICE_GAP = 2 // degrees
+// Pulled from the button's middle less than this share of its radius, nothing is chosen
+const PULL_TO_CHOOSE = 0.8
 
 // Drawn afresh whenever a sound or button comes, goes or changes
 async function show() {
 	sounds.replaceChildren()
 	for (const { folder, name, hue } of SOUNDS) {
-		offerRadial(showButton(`${folder}/`, name, hue), [installing(`${folder}/`)])
+		offerWheel(showButton(`${folder}/`, name, hue), [installing(`${folder}/`)])
 	}
 	// Served by the service worker rather than the site (see sw.js)
 	for (const button of await savedButtons()) {
 		const href = `custom/${button.id}/`
-		offerRadial(showButton(href, button.name, button.hue), [installing(href), renaming(button), demoting(button)])
+		offerWheel(showButton(href, button.name, button.hue), [installing(href), renaming(button), demoting(button)])
 	}
 	const recordings = await recentRecordings()
 	recent.hidden = recordings.length === 0
@@ -53,7 +54,7 @@ function showButton(href, name, hue) {
 
 function recordingRow(recording) {
 	const row = document.querySelector("template.recording").content.firstElementChild.cloneNode(true)
-	const when = new Date(recording.at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })
+	const when = new Date(recording.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })
 	row.querySelector(".when").textContent = recording.name ? `${recording.name} · ${when}` : when
 	row.querySelector(".play").addEventListener("click", () => new Audio(URL.createObjectURL(recording.sound)).play())
 	row.querySelector(".promote").addEventListener("click", () => {
@@ -200,15 +201,15 @@ async function stopTaping() {
 	show()
 }
 
-// Options sit around the button at an angle: 0 degrees is to its right, -90 straight up
+// The wheel's options, each with the picture in its slice (24 px square, drawn in strokes)
 function installing(href) {
-	return { label: "INSTALL", angle: -90, act: () => location.href = `${href}?install` }
+	return { label: "INSTALL", picture: "M12 4v11M7 10l5 5 5-5M5 20h14", act: () => location.href = `${href}?install` }
 }
 
 function renaming(button) {
 	return {
 		label: "RENAME",
-		angle: 180,
+		picture: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
 		act: () => startNaming("RENAME", button.name, button.hue, (name, hue) => rename(button, name, hue)),
 	}
 }
@@ -216,7 +217,7 @@ function renaming(button) {
 function demoting(button) {
 	return {
 		label: "DEMOTE",
-		angle: 90,
+		picture: "M6 6l6 6 6-6M6 13l6 6 6-6",
 		act: async () => {
 			await demote(button)
 			show()
@@ -224,97 +225,131 @@ function demoting(button) {
 	}
 }
 
-function offerRadial(link, options) {
-	let press = null // where the pointer went down, while it's held
+// A press held a moment, or dragged off the button's edge, opens its wheel; the slice pulled
+// toward is chosen as the press lets go. A right-click opens it too, to point at and click
+function offerWheel(link, options) {
+	let pressing = null // the pointer pressing this button
 	let opened = false // by this press, so letting go doesn't also open the button
 	let holding
-	const open = () => {
+	const open = (pointing) => {
 		opened = true
-		openRadial(link, options)
+		openWheel(link, options, pointing)
 	}
 	link.addEventListener("pointerdown", (event) => {
-		press = { x: event.clientX, y: event.clientY }
+		if (event.button !== 0) return
+		pressing = event.pointerId
 		opened = false
 		// Followed off the button, since dragging off it is how an option is chosen
 		link.setPointerCapture(event.pointerId)
 		holding = setTimeout(open, LONG_PRESS)
 	})
 	link.addEventListener("pointermove", (event) => {
-		if (!press) return
-		const right = event.clientX - press.x
-		const down = event.clientY - press.y
-		if (!opened && Math.hypot(right, down) > DRAG_TO_OPEN) open()
-		if (opened) aim(right, down)
+		if (event.pointerId !== pressing) return
+		const { x, y, radius } = circleOf(link)
+		if (!opened && Math.hypot(event.clientX - x, event.clientY - y) > radius) {
+			clearTimeout(holding)
+			open()
+		}
+		if (opened) aim(event.clientX, event.clientY)
 	})
-	link.addEventListener("pointerup", () => {
+	link.addEventListener("pointerup", (event) => {
+		if (event.pointerId !== pressing) return
 		clearTimeout(holding)
-		press = null
-		// Let go on an option and it's chosen; anywhere else, the options stay open to be tapped
-		const chosen = selecting?.options.find((option) => option.chosen)
-		if (chosen) choose(chosen)
+		pressing = null
+		if (opened) letGo()
 	})
 	link.addEventListener("pointercancel", () => {
 		clearTimeout(holding)
-		press = null
-		closeRadial()
+		pressing = null
+		closeWheel()
 	})
 	link.addEventListener("click", (event) => opened && event.preventDefault())
-	// Right-clicks open it too, and phones' own long-press menus give way to it
 	link.addEventListener("contextmenu", (event) => {
 		event.preventDefault()
-		open()
+		// Android's long press is a contextmenu too, by when the wheel is already open
+		if (pressing === null) open(true)
 	})
 }
 
-let selecting = null // the options open, each with its element and whether it's chosen
-
-// Android fires its long press as a contextmenu too, so this can be asked twice for one press
-function openRadial(link, options) {
-	if (selecting) return
+// The small button drawn above a sound's name
+function circleOf(link) {
 	const box = link.getBoundingClientRect()
 	const diameter = parseFloat(getComputedStyle(link, "::before").width)
-	radial.style.left = `${box.left + box.width / 2}px`
-	radial.style.top = `${box.top + diameter / 2}px`
-	radial.style.setProperty("--reach", `${diameter / 2 + 44}px`)
-	selecting = {
-		options: options.map((option) => {
-			const element = document.createElement("button")
-			element.textContent = option.label
-			element.style.setProperty("--angle", `${option.angle}deg`)
-			element.addEventListener("click", () => choose(option))
-			return { ...option, element, chosen: false }
-		}),
+	return { x: box.left + box.width / 2, y: box.top + diameter / 2, radius: diameter / 2 }
+}
+
+let turning = null // the open wheel: its options, where it is, and which slice is chosen
+
+// pointing: opened by a right-click, so chosen by pointing and clicking rather than letting go
+function openWheel(link, options, pointing = false) {
+	if (turning) return
+	const { x, y, radius } = circleOf(link)
+	const inner = radius + 6
+	const outer = inner + RING_WIDTH
+	const share = 360 / options.length
+	const point = (distance, degrees) => [distance * Math.cos(degrees * Math.PI / 180), distance * Math.sin(degrees * Math.PI / 180)]
+	const slices = options.map((option, index) => {
+		// The first slice is centred at the top, the rest following clockwise
+		const middle = -90 + index * share
+		const from = middle - share / 2 + SLICE_GAP / 2
+		const to = middle + share / 2 - SLICE_GAP / 2
+		const large = to - from > 180 ? 1 : 0
+		const [pictureX, pictureY] = point((inner + outer) / 2, middle)
+		return `<path class="slice" d="M ${point(outer, from)} A ${outer} ${outer} 0 ${large} 1 ${point(outer, to)} L ${point(inner, to)} A ${inner} ${inner} 0 ${large} 0 ${point(inner, from)} Z"/>
+			<path class="picture" d="${option.picture}" transform="translate(${pictureX} ${pictureY}) scale(1.15) translate(-12 -12)"/>`
+	})
+	wheel.innerHTML = `<svg viewBox="${-outer} ${-outer} ${2 * outer} ${2 * outer}" width="${2 * outer}" height="${2 * outer}" style="left: ${x}px; top: ${y}px">
+		<circle class="hole" r="${inner - 4}"/>${slices.join("")}
+	</svg><span class="named" style="left: ${x}px; top: ${y}px"></span>`
+	wheel.style.setProperty("--hue", link.style.getPropertyValue("--hue"))
+	turning = {
+		options,
+		x,
+		y,
+		radius,
+		share,
+		pointing,
+		name: link.textContent,
+		chosen: null,
+		slices: [...wheel.querySelectorAll(".slice")],
+		named: wheel.querySelector(".named"),
 	}
-	radial.replaceChildren(...selecting.options.map((option) => option.element))
-	radial.showPopover()
+	turning.named.textContent = turning.name
+	wheel.showPopover()
 }
 
-// The option in the drag's direction, once the drag has gone far enough
-function aim(right, down) {
-	const angle = Math.atan2(down, right) * 180 / Math.PI
-	const apart = (option) => Math.abs((((angle - option.angle) % 360) + 540) % 360 - 180)
-	const far = Math.hypot(right, down) > DRAG_TO_CHOOSE
-	const nearest = selecting.options.reduce((best, option) => apart(option) < apart(best) ? option : best)
-	for (const option of selecting.options) {
-		option.chosen = far && option === nearest && apart(option) < AIM
-		option.element.classList.toggle("chosen", option.chosen)
-	}
+// The slice in the pointer's direction from the button's middle, once pulled out far enough
+function aim(pointerX, pointerY) {
+	const right = pointerX - turning.x
+	const down = pointerY - turning.y
+	const degrees = Math.atan2(down, right) * 180 / Math.PI
+	const index = Math.floor(((((degrees + 90 + turning.share / 2) % 360) + 360) % 360) / turning.share)
+	const pulled = Math.hypot(right, down) > turning.radius * PULL_TO_CHOOSE
+	turning.chosen = pulled ? turning.options[index] : null
+	turning.slices.forEach((slice, sliceIndex) => slice.classList.toggle("chosen", pulled && sliceIndex === index))
+	turning.named.textContent = turning.chosen?.label ?? turning.name
 }
 
-function choose(option) {
-	closeRadial()
-	option.act()
+function letGo() {
+	const chosen = turning?.chosen
+	closeWheel()
+	chosen?.act()
 }
 
-function closeRadial() {
-	radial.hidePopover()
-	selecting = null
+function closeWheel() {
+	wheel.hidePopover()
+	turning = null
 }
 
-// Closed by hand rather than by the browser, which would close it as the long press that opened
-// it is let go: a press anywhere else closes it, as does Escape
-addEventListener("pointerdown", (event) => radial.contains(event.target) || closeRadial())
-addEventListener("keydown", (event) => event.key === "Escape" && closeRadial())
+// Opened by a right-click, the wheel covers the page: pointing chooses, and a click acts on the
+// choice, or closes the wheel when nothing is chosen
+wheel.addEventListener("pointermove", (event) => turning?.pointing && aim(event.clientX, event.clientY))
+wheel.addEventListener("pointerdown", (event) => {
+	if (!turning?.pointing) return
+	aim(event.clientX, event.clientY)
+	letGo()
+})
+addEventListener("keydown", (event) => event.key === "Escape" && turning && closeWheel())
 
 // Dialogs close on a press outside them, on the dimmed page, or on CANCEL
 for (const dialog of [naming, fetching]) {
@@ -337,6 +372,8 @@ function startNaming(confirming, name, hue, then) {
 	showPreview()
 	naming.returnValue = ""
 	naming.showModal()
+	// A name brought in is highlighted, to be typed straight over
+	if (name) namingForm.elements.name.select()
 }
 
 function showPreview() {
@@ -345,6 +382,11 @@ function showPreview() {
 	preview.textContent = namingForm.elements.name.value.toUpperCase() || " "
 }
 namingForm.addEventListener("input", showPreview)
+// Enter confirms at a keyboard; on a touch screen it only closes the keyboard, so a name isn't
+// confirmed by accident on the way to picking a color
+namingForm.addEventListener("keydown", (event) => {
+	if (event.key === "Enter" && matchMedia("(pointer: coarse)").matches) event.preventDefault()
+})
 
 naming.addEventListener("close", async () => {
 	if (naming.returnValue !== "confirm") return

@@ -202,7 +202,7 @@ body > * {
 	width: 11em;
 	margin: 0;
 	text-align: center;
-	font: 700 1.1rem OpenDyslexic, sans-serif;
+	font: 700 0.99rem OpenDyslexic, sans-serif;
 	letter-spacing: 0.04em;
 	color: hsl(var(--hue) 70% 82%);
 }
