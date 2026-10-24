@@ -122,6 +122,11 @@
 		const TILT_DEGREES = 8
 		// Number keys 1-8 play the call up a major scale, do to do, in semitones above as recorded
 		const SCALE = [0, 2, 4, 5, 7, 9, 11, 12]
+		// Phones: raising the top edge turns the knob up, this many knob degrees per degree raised
+		// from how it was held when the app opened. Rolling it onto its side slows the call to a
+		// standstill, and on over to face down plays it backwards
+		const RAISE_TO_KNOB = 3
+		const SENSOR_SMOOTHING = 0.25 // of each new reading taken, so hand tremor doesn't wobble the sound
 
 		const audio = new AudioContext()
 		const volume = audio.createGain()
@@ -139,6 +144,9 @@
 		})
 
 		let hand = 0 // degrees the knob has been turned to (positive is anticlockwise), before the detent eases it
+		let raise = 0 // degrees added to the knob by raising the phone
+		let dragSpeed = 1
+		let rollSpeed = 1
 		let bending = null // the pointer holding the middle of the button, and where it pressed
 		let wheelTurned = false // the wheel turned the knob during this hold, so it springs back after
 		const held = new Set() // pointers currently holding the button or the knob
@@ -161,9 +169,7 @@
 		// motion: "drag" follows the hand exactly; "step" and "home" spring there (see SPRINGS)
 		function turnKnob(degrees, motion) {
 			hand = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, degrees))
-			// Eases to zero near the centre, so dwelling close to normal settles there, while
-			// matching the hand exactly at the detent's edge so there is never a jump
-			knob.target = Math.abs(hand) < DETENT ? hand * (hand / DETENT) ** 2 : hand
+			aimKnob()
 			if (motion === "drag") {
 				knob.shown = knob.target
 				knob.velocity = 0
@@ -189,6 +195,13 @@
 			}
 		}
 
+		function aimKnob() {
+			const turned = Math.max(-KNOB_LIMIT, Math.min(KNOB_LIMIT, hand + raise))
+			// Eases to zero near the centre, so dwelling close to normal settles there, while
+			// matching the hand exactly at the detent's edge so there is never a jump
+			knob.target = Math.abs(turned) < DETENT ? turned * (turned / DETENT) ** 2 : turned
+		}
+
 		// The pitch follows the drawn knob, so its springy settle can be heard as well as seen
 		function showKnob() {
 			dial.style.setProperty("--turn", `${-knob.shown}deg`)
@@ -204,7 +217,8 @@
 			button.style.setProperty("--tilt-x", `${-lowering * TILT_DEGREES}deg`)
 			button.style.setProperty("--tilt-y", `${across * TILT_DEGREES}deg`)
 			// Speed along a curve, so fine changes near normal are easy: 0.2x fully left, 3.5x fully right
-			glide("speed", across < 0 ? 0.2 ** -across : 3.5 ** across)
+			dragSpeed = across < 0 ? 0.2 ** -across : 3.5 ** across
+			glide("speed", dragSpeed * rollSpeed)
 			const lift = limit(-down / (bending.radius * LOUDNESS_REACH))
 			const loudness = lift > 0 ? 1 + (LOUDEST - 1) * lift ** LOUDNESS_CURVE : 1 - 0.8 * lowering // down to 0.2x
 			volume.gain.setTargetAtTime(loudness, audio.currentTime, 0.02)
@@ -303,6 +317,39 @@
 			clearTimeout(unpress)
 			unpress = setTimeout(() => held.size || button.classList.remove("pressed"), 60)
 		}, { passive: false })
+
+		// Which way is up, in the phone's own axes (x to its right, y to its top, z out of the screen)
+		let up = null
+		let restingRaise = null // the top edge's angle above level when the app opened
+		addEventListener("deviceorientation", ({ beta, gamma }) => {
+			if (beta === null) return // a computer without motion sensors
+			const tipped = beta * Math.PI / 180
+			const leaning = gamma * Math.PI / 180
+			const reading = { x: -Math.sin(leaning) * Math.cos(tipped), y: Math.sin(tipped), z: Math.cos(leaning) * Math.cos(tipped) }
+			up ??= reading
+			for (const axis of ["x", "y", "z"]) up[axis] += (reading[axis] - up[axis]) * SENSOR_SMOOTHING
+			// Speed is the cosine of the roll around the phone's long axis: on its edge is a
+			// standstill, face down full speed backwards. Unreadable while the phone stands upright
+			const across = Math.hypot(up.x, up.z)
+			if (across > 0.2) {
+				const roll = up.z / across
+				rollSpeed = roll > 0.97 ? 1 : roll // a little lean counts as level
+				glide("speed", dragSpeed * rollSpeed)
+			}
+			const raised = Math.asin(Math.max(-1, Math.min(1, up.y))) * 180 / Math.PI
+			restingRaise ??= raised
+			raise = (raised - restingRaise) * RAISE_TO_KNOB
+			aimKnob()
+			// A springing knob carries on to the new aim; a resting one follows the phone directly
+			if (!knob.moving) {
+				knob.shown = knob.target
+				showKnob()
+			}
+		})
+		// iPhones share motion only once the person allows it, which can only be asked on a tap
+		if (typeof DeviceOrientationEvent?.requestPermission === "function") {
+			button.addEventListener("click", () => DeviceOrientationEvent.requestPermission(), { once: true })
+		}
 
 		navigator.serviceWorker?.register("sw.js")
 	</script>
