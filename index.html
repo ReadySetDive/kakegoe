@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+	<title>Kakegoe</title>
+	<meta name="theme-color" content="#141010">
+	<meta name="mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+	<meta name="apple-mobile-web-app-title" content="Kakegoe">
+	<link rel="manifest" href="manifest.webmanifest">
+	<link rel="icon" href="icon-192.png">
+	<link rel="apple-touch-icon" href="apple-touch-icon.png">
+	<style>
+		html, body {
+			margin: 0;
+			height: 100%;
+			background: #141010;
+			overflow: hidden;
+			/* No zoom, selection or long-press menus when tapping fast */
+			touch-action: manipulation;
+			user-select: none;
+			-webkit-user-select: none;
+			-webkit-touch-callout: none;
+			-webkit-tap-highlight-color: transparent;
+		}
+		body {
+			display: grid;
+			place-items: center;
+		}
+		button {
+			width: min(62vmin, 340px);
+			aspect-ratio: 1;
+			border-radius: 50%;
+			border: none;
+			cursor: pointer;
+			background: radial-gradient(circle at 38% 32%, #ff6a5c, #d81e14 45%, #8f0d08 100%);
+			box-shadow: 0 1.6vmin 0 #5a0603, 0 3vmin 6vmin rgba(0, 0, 0, 0.6), inset 0 -1vmin 3vmin rgba(0, 0, 0, 0.35);
+			transition: transform 60ms, box-shadow 60ms;
+		}
+		button.pressed {
+			transform: translateY(1.2vmin) scale(0.97);
+			box-shadow: 0 0.4vmin 0 #5a0603, 0 1.5vmin 3vmin rgba(0, 0, 0, 0.6), inset 0 -0.5vmin 2vmin rgba(0, 0, 0, 0.45);
+		}
+	</style>
+</head>
+<body>
+	<button aria-label="Yoooo! (play the call)"></button>
+	<script type="module">
+		// Lets iPhones play it even with the ring/silent switch on silent
+		if (navigator.audioSession) navigator.audioSession.type = "playback"
+
+		const button = document.querySelector("button")
+		const audio = new AudioContext()
+		// Decoded once up front, so each press starts instantly and presses overlap freely
+		const call = fetch("yo.mp3").then((response) => response.arrayBuffer()).then((bytes) => audio.decodeAudioData(bytes))
+
+		async function play() {
+			// Browsers only allow sound after a touch, so wake the audio on the press itself
+			if (audio.state !== "running") audio.resume()
+			const voice = audio.createBufferSource()
+			voice.buffer = await call
+			voice.connect(audio.destination)
+			voice.start()
+		}
+
+		// On press rather than click: the sound starts the instant a finger lands
+		button.addEventListener("pointerdown", (event) => {
+			event.preventDefault()
+			button.classList.add("pressed")
+			play()
+		})
+		for (const release of ["pointerup", "pointercancel", "pointerleave"]) {
+			button.addEventListener(release, () => button.classList.remove("pressed"))
+		}
+		button.addEventListener("keydown", (event) => {
+			if (event.key === " " || event.key === "Enter") {
+				event.preventDefault()
+				play()
+			}
+		})
+		button.addEventListener("contextmenu", (event) => event.preventDefault())
+
+		navigator.serviceWorker?.register("sw.js")
+	</script>
+</body>
+</html>
