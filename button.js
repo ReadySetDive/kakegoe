@@ -103,7 +103,8 @@ const voices = audio.audioWorklet.addModule(new URL("voices.js", import.meta.url
 	const at = (seconds) => Math.round(seconds * call.sampleRate)
 	const channels = crop ? whole.map((samples) => samples.slice(at(crop.from), at(crop.to))) : whole
 	node.port.postMessage({ channels })
-	if (openedToEdit) showCropper(whole[0], call.duration)
+	node.port.postMessage({ baseline: { speed: thisSound.speed ?? 1, pitch: 2 ** ((thisSound.pitch ?? 0) / 12) } })
+	if (openedToEdit) showEditor(node, whole[0], call.duration)
 	else drawWaveform(channels[0])
 	node.port.onmessage = ({ data }) => {
 		const shown = data.progress?.find((press) => press.id === ringPress)
@@ -608,14 +609,19 @@ document.addEventListener("pointerdown", (event) => {
 
 // Opened to edit: an arc over the button, from 9 o'clock over the top to 3 o'clock, is the whole
 // sound, its loudness spiking out along it. A handle at either end crops it, sounding where
-// it's dragged to; pressing the button plays what's kept. SAVE keeps the crop for this button
-// (see saved.js), CANCEL doesn't, and either goes back to the home page
+// it's dragged to. Below, the button's own speed and pitch, which every press starts from and
+// bends on top of; pressing the button plays what's kept, as it'll sound. SAVE keeps the edits
+// for this button (see saved.js), CANCEL doesn't, and either goes back to the home page
 const CROP_BARS = 90
 const CROP_HEARD = 0.35 // seconds heard beside a handle as it's dragged
 const SHORTEST_CROP = 0.1 // seconds
 const cropping = { from: 0, to: Infinity } // what's kept, in seconds
 
-function showCropper(samples, duration) {
+const FASTEST = 2 // either way: below 0 is backwards
+const SLOWEST = 0.1 // either way: 0 would never move
+const PITCH_REACH = 12 // semitones either way
+
+function showEditor(node, samples, duration) {
 	Object.assign(cropping, thisSound.crop ?? { from: 0, to: duration })
 	document.body.classList.add("editing")
 	// Degrees clockwise from 12 o'clock, for a time in the sound, and a point on the ring's view there
@@ -631,7 +637,11 @@ function showCropper(samples, duration) {
 		<g class="handle" data-end="from"><circle r="1.8"/><circle class="grip" r="8"/></g>
 		<g class="handle" data-end="to"><circle r="1.8"/><circle class="grip" r="8"/></g>
 	</svg>`)
-	document.body.insertAdjacentHTML("beforeend", `<p class="editing-controls"><span class="kept-length"></span><button class="cancel">CANCEL</button><button class="save">SAVE</button></p>`)
+	document.body.insertAdjacentHTML("beforeend", `<div class="editing-controls">
+		<label>SPEED <input name="speed" type="range" min="${-FASTEST}" max="${FASTEST}" step="0.1"><output></output></label>
+		<label>PITCH <input name="pitch" type="range" min="${-PITCH_REACH}" max="${PITCH_REACH}" step="1"><output></output></label>
+		<p><span class="kept-length"></span><button class="cancel">CANCEL</button><button class="save">SAVE</button></p>
+	</div>`)
 	const cropper = button.querySelector(".cropper")
 	const spikeLines = [...cropper.querySelectorAll(".bar")]
 
@@ -674,11 +684,31 @@ function showCropper(samples, duration) {
 		})
 	}
 
+	const speed = document.querySelector(".editing-controls [name=speed]")
+	const pitch = document.querySelector(".editing-controls [name=pitch]")
+	speed.value = thisSound.speed ?? 1
+	pitch.value = thisSound.pitch ?? 0
+	let speedWas = Number(speed.value)
+	function showAdjusting() {
+		// Crossing 0, the speed jumps to just the other side of it, on in the direction it was going
+		if (Number(speed.value) === 0) speed.value = speedWas > 0 ? -SLOWEST : SLOWEST
+		speedWas = Number(speed.value)
+		speed.nextElementSibling.textContent = `${Number(speed.value).toFixed(1)}×`
+		pitch.nextElementSibling.textContent = `${pitch.value > 0 ? "+" : ""}${pitch.value}`
+		node.port.postMessage({ baseline: { speed: Number(speed.value), pitch: 2 ** (pitch.value / 12) } })
+	}
+	showAdjusting()
+	for (const slider of [speed, pitch]) {
+		slider.addEventListener("input", showAdjusting)
+		// Let go, and what's kept plays as it'll sound
+		slider.addEventListener("change", () => play(1, cropping))
+	}
+
 	const home = new URL("./", import.meta.url)
 	document.querySelector(".editing-controls .cancel").addEventListener("click", () => location.replace(home))
 	document.querySelector(".editing-controls .save").addEventListener("click", async () => {
 		const whole = cropping.from < 0.01 && cropping.to > duration - 0.01
-		await cropButton(thisSound, whole ? null : { from: cropping.from, to: cropping.to })
+		await editButton(thisSound, { crop: whole ? null : { from: cropping.from, to: cropping.to }, speed: Number(speed.value), pitch: Number(pitch.value) })
 		location.replace(home)
 	})
 }

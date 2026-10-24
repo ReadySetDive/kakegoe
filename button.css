@@ -247,16 +247,53 @@ body > * {
 	cursor: grab;
 	touch-action: none;
 }
+/* Below the button: its speed and pitch, then the kept length, CANCEL and SAVE. The block's top
+   sits just under the button, however tall it is */
 .editing-controls {
 	z-index: 1;
 	align-self: center;
-	translate: 0 calc(min(31vmin, 170px) + 5rem);
+	translate: 0 calc(50% + min(31vmin, 170px) + 2.5rem);
+	display: grid;
+	justify-items: center;
+	gap: 0.9rem;
+	font: 700 0.9rem OpenDyslexic, sans-serif;
+	letter-spacing: 0.04em;
+	color: #b3a5a1;
+}
+.editing-controls label {
+	display: grid;
+	grid-template-columns: 4.5em 10rem 3.5em;
+	align-items: center;
+	gap: 0.6rem;
+}
+.editing-controls output {
+	color: hsl(var(--hue) 70% 82%);
+}
+.editing-controls input {
+	appearance: none;
+	height: 0.4rem;
+	border-radius: 999px;
+	background: #2c2323;
+}
+.editing-controls input::-webkit-slider-thumb {
+	appearance: none;
+	width: 1.3rem;
+	aspect-ratio: 1;
+	border-radius: 50%;
+	background: hsl(var(--hue) 100% 88%);
+}
+.editing-controls input::-moz-range-thumb {
+	width: 1.3rem;
+	height: 1.3rem;
+	border: none;
+	border-radius: 50%;
+	background: hsl(var(--hue) 100% 88%);
+}
+.editing-controls p {
 	display: flex;
 	align-items: center;
 	gap: 0.8rem;
 	margin: 0;
-	font: 700 0.9rem OpenDyslexic, sans-serif;
-	letter-spacing: 0.04em;
 }
 .kept-length {
 	min-width: 3.5em;

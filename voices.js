@@ -11,6 +11,9 @@
 // also be scrubbed: dragged to places in its part, sounding only while it moves, like tape under a
 // finger. The progress of every held copy is reported, so the page can show and scrub it.
 //
+// A button can have its own speed and pitch, which every copy starts from and bends on top of.
+// Backwards (a speed below zero), a copy starts at the end of its part and plays to the start.
+//
 // Grains are placed by WSOLA: each new grain may slide a few milliseconds from where it would
 // naturally start, to wherever the recording best matches what the previous grain is playing as
 // they cross-fade. Unaligned grains half-cancel each other at a steady rate, which is what makes
@@ -38,17 +41,19 @@ class Voices extends AudioWorkletProcessor {
 		this.recording = [] // one Float32Array per channel
 		this.voices = []
 		this.heldSpeed = 1
+		this.baseline = { speed: 1, pitch: 1 } // the button's own, under every bend
 		this.blocks = 0
 		this.port.onmessage = ({ data }) => {
 			if ("channels" in data) this.recording = data.channels
 			// note, from, to, and for a held press its id
-			else if ("note" in data) this.voices.push({ ...data, held: data.id !== undefined, scrubTo: null, speed: 1, loudness: 1, grains: null })
+			else if ("note" in data) this.voices.push({ ...data, held: data.id !== undefined, scrubTo: null, speed: this.baseline.speed, loudness: 1, grains: null })
 			else if ("release" in data) {
 				for (const voice of this.voices) if (voice.id === data.release) Object.assign(voice, { held: false, scrubTo: null })
 			} else if ("scrub" in data) {
 				// through: how far into its part to drag the copy (0 to 1), or null to stop scrubbing
 				for (const voice of this.voices) if (voice.id === data.scrub) Object.assign(voice, { held: true, scrubTo: data.through })
 			} else if ("silence" in data) this.voices = []
+			else if ("baseline" in data) this.baseline = data.baseline
 			else this.heldSpeed = data.heldSpeed
 		}
 	}
@@ -86,17 +91,17 @@ class Voices extends AudioWorkletProcessor {
 		const out = outputs[0]
 		const length = this.recording[0]?.length ?? 0
 		for (const voice of this.voices) {
-			const pitch = knobPitch * voice.note
+			const pitch = knobPitch * voice.note * this.baseline.pitch
 			if (!voice.grains) {
 				voice.from = Math.round(voice.from * sampleRate)
 				voice.to = Math.min(length - 2, Math.round(voice.to * sampleRate))
-				// Starting at the very beginning, a copy begins with a grain already at full strength, so
-				// its first moment is not faded in; starting mid-sound, it fades in to avoid a click
-				const grains = voice.from === 0 ? [{ start: -HOP * pitch, age: HOP, direction: 1 }] : []
-				Object.assign(voice, { position: voice.from, untilGrain: 0, grains })
+				// Starting forwards at the very beginning, a copy begins with a grain already at full
+				// strength, so its first moment is not faded in; starting elsewhere, it fades in to avoid a click
+				const grains = voice.from === 0 && this.baseline.speed > 0 ? [{ start: -HOP * pitch, age: HOP, direction: 1 }] : []
+				Object.assign(voice, { position: this.baseline.speed < 0 ? voice.to - 1 : voice.from, untilGrain: 0, grains })
 			}
 			const scrubbing = voice.scrubTo !== null
-			let wanted = voice.held ? this.heldSpeed : 1
+			let wanted = (voice.held ? this.heldSpeed : 1) * this.baseline.speed
 			if (scrubbing) {
 				const target = voice.from + voice.scrubTo * (voice.to - voice.from)
 				wanted = Math.max(-4, Math.min(4, (target - voice.position) / SCRUB_CATCH_UP))

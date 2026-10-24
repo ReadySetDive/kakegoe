@@ -110,7 +110,7 @@ async function addButton(sound, name, hue) {
 
 // entry: what the button plays, from a recording, another button, or one of the site's sounds
 function makeButton(entry, name, hue) {
-	const button = { id: crypto.randomUUID().slice(0, 8), name: name.toUpperCase(), hue, sound: entry.sound, site: entry.site, crop: entry.crop }
+	const button = { id: crypto.randomUUID().slice(0, 8), name: name.toUpperCase(), hue, sound: entry.sound, site: entry.site, crop: entry.crop, speed: entry.speed, pitch: entry.pitch }
 	return saved("buttons", "readwrite", (buttons) => buttons.add(button))
 }
 
@@ -120,10 +120,10 @@ async function promote(recording, name, hue) {
 	await saved("recordings", "readwrite", (recordings) => recordings.delete(recording.id))
 }
 
-// A button goes back to being a recording, the newest, named after the button, its crop kept.
+// A button goes back to being a recording, the newest, named after the button, its edits kept.
 // Copies of it pointing at the same sound are left as they are
 async function demote(button) {
-	await keepRecording({ sound: button.sound, site: button.site, crop: button.crop, name: button.name, at: Date.now() })
+	await keepRecording({ sound: button.sound, site: button.site, crop: button.crop, speed: button.speed, pitch: button.pitch, name: button.name, at: Date.now() })
 	await saved("buttons", "readwrite", (buttons) => buttons.delete(button.id))
 }
 
@@ -131,9 +131,10 @@ function rename(button, name, hue) {
 	return saved("buttons", "readwrite", (buttons) => buttons.put({ ...button, name: name.toUpperCase(), hue }))
 }
 
-// crop: { from, to }, in seconds, or null for the whole sound, which itself is never changed
-function cropButton(button, crop) {
-	return saved("buttons", "readwrite", (buttons) => buttons.put({ ...button, crop }))
+// A button's edits: its crop ({ from, to }, in seconds, or null for the whole sound, which itself
+// is never changed), its speed (1 as recorded, below 0 backwards) and its pitch (in semitones)
+function editButton(button, edits) {
+	return saved("buttons", "readwrite", (buttons) => buttons.put({ ...button, ...edits }))
 }
 
 function savedButtons() {
@@ -149,7 +150,7 @@ function savedButton(id) {
 async function adoptOldCrops() {
 	for (const [path, crop] of Object.entries(JSON.parse(localStorage.getItem("crops") ?? "{}"))) {
 		const button = path.includes("/custom/") && await savedButton(path.split("/").at(-2))
-		if (button) await cropButton(button, crop)
+		if (button) await editButton(button, { crop })
 	}
 	localStorage.removeItem("crops")
 }
