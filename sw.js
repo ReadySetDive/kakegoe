@@ -1,6 +1,6 @@
 // Keeps the whole app on the device, so it opens instantly and works with no signal.
 // Bump VERSION whenever a file changes, or installed copies keep the old one.
-const VERSION = "kakegoe-2"
+const VERSION = "kakegoe-3"
 const FILES = [
 	"./",
 	"index.html",

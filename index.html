@@ -82,6 +82,18 @@
 		})
 		button.addEventListener("contextmenu", (event) => event.preventDefault())
 
+		// Every notch of a mouse wheel over the button is a press. A notch arrives as one big
+		// jump (a line, or about 100 px); touchpads send streams of small deltas, which are ignored
+		let unpress
+		button.addEventListener("wheel", (event) => {
+			event.preventDefault()
+			if (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL && Math.abs(event.deltaY) < 40) return
+			play()
+			button.classList.add("pressed")
+			clearTimeout(unpress)
+			unpress = setTimeout(() => button.classList.remove("pressed"), 60)
+		}, { passive: false })
+
 		navigator.serviceWorker?.register("sw.js")
 	</script>
 </body>
