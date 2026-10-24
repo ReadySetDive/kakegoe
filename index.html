@@ -90,16 +90,42 @@
 			border-radius: 0.8rem;
 			background: #1d1717;
 		}
-		/* The time a recording was made, at its own size, on one line however narrow the screen */
-		.when {
+		/* A recording's name, or how naming it is going, on up to two lines, and below, small, when
+		   it was made, on one */
+		.about {
 			flex: 1;
 			min-width: 0;
+			display: grid;
+			gap: 0.15rem;
+		}
+		.title {
+			display: -webkit-box;
+			-webkit-box-orient: vertical;
+			-webkit-line-clamp: 2;
+			line-clamp: 2;
+			overflow: hidden;
+			font-size: 0.85rem;
+			color: #e8dcd8;
+		}
+		.when {
 			overflow: hidden;
 			white-space: nowrap;
 			text-overflow: ellipsis;
-			font-size: 0.85rem;
+		}
+		.when {
+			font-size: 0.68rem;
+			color: #8a7d7a;
+		}
+		.when:empty {
+			display: none;
+		}
+		.working .title {
 			color: #b3a5a1;
 		}
+		.trouble .title {
+			color: hsl(3 90% 72%);
+		}
+		/* What went wrong is shown whole, however many lines it takes */
 		.trouble .when {
 			white-space: normal;
 		}
@@ -348,6 +374,13 @@
 			stroke: rgba(232, 220, 216, 0.1);
 			transition: fill 0.08s;
 		}
+		/* Not to be chosen, like INSTALL for a button that's installed */
+		.slice.unavailable {
+			fill: rgba(29, 23, 23, 0.5);
+		}
+		.slice.unavailable + .picture {
+			opacity: 0.35;
+		}
 		.slice.chosen {
 			fill: hsl(var(--hue) 55% 36%);
 		}
@@ -405,7 +438,7 @@
 	<template class="recording">
 		<li>
 			<button class="icon play" aria-label="Play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg></button>
-			<span class="when"></span>
+			<span class="about"><span class="title"><span class="words"></span><span class="dots"></span></span><span class="when"></span></span>
 			<button class="icon promote" aria-label="Promote to a button"><svg viewBox="0 0 24 24"><path d="M6 18l6-6 6 6M6 11l6-6 6 6"/></svg></button>
 			<button class="icon save" aria-label="Save as an MP3"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/></svg></button>
 			<button class="icon bin" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button>

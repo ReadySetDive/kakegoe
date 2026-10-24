@@ -56,7 +56,8 @@ function recordingRow(recording) {
 	const row = document.querySelector("template.recording").content.firstElementChild.cloneNode(true)
 	const when = new Date(recording.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })
 	row.dataset.id = recording.id
-	row.dataset.label = recording.name ? `${recording.name} · ${when}` : when
+	row.dataset.name = recording.name ?? ""
+	row.dataset.when = when
 	labelRow(row)
 	row.querySelector(".play").addEventListener("click", () => new Audio(URL.createObjectURL(recording.sound)).play())
 	row.querySelector(".promote").addEventListener("click", () => {
@@ -317,7 +318,7 @@ async function nameByWords(id, samples, sampleRate) {
 		transcriber = new Worker("transcribe.js", { type: "module" })
 		transcriber.onmessage = ({ data }) => {
 			if ("downloading" in data) {
-				for (const waiting of hearing.keys()) showTranscribing(waiting, `GETTING READY ${Math.round(data.downloading * 100)}%`)
+				for (const waiting of hearing.keys()) showTranscribing(waiting, { title: `GETTING READY ${Math.round(data.downloading * 100)}%`, working: true })
 				return
 			}
 			hearing.get(data.id)(data)
@@ -329,7 +330,7 @@ async function nameByWords(id, samples, sampleRate) {
 			hearing.clear()
 		}
 	}
-	showTranscribing(id, "TRANSCRIBING…")
+	showTranscribing(id, { title: "TRANSCRIBING", working: true })
 	const heard = await at16k(samples, sampleRate)
 		.then((speech) => new Promise((resolve) => {
 			hearing.set(id, resolve)
@@ -338,7 +339,7 @@ async function nameByWords(id, samples, sampleRate) {
 		.catch((error) => ({ error: error.message }))
 	if (heard.error) {
 		console.error("Couldn't name a recording by its words:", heard.error)
-		return showTranscribing(id, `COULDN'T TRANSCRIBE: ${heard.error}`)
+		return showTranscribing(id, { title: "COULDN'T TRANSCRIBE", detail: heard.error, trouble: true })
 	}
 	transcribing.delete(id)
 	const name = nameFrom(heard.text)
@@ -346,9 +347,9 @@ async function nameByWords(id, samples, sampleRate) {
 	show()
 }
 
-// How naming a recording is going, shown after its time until it's named: kept here, not with the
+// How naming a recording is going, shown where its name will go: kept here, not with the
 // recording, so it's gone on the next visit
-const transcribing = new Map() // recording id -> how transcribing it is going
+const transcribing = new Map() // recording id -> { title, detail, working, trouble }
 
 function showTranscribing(id, status) {
 	transcribing.set(id, status)
@@ -356,12 +357,22 @@ function showTranscribing(id, status) {
 	if (row) labelRow(row)
 }
 
+// A row's title is the recording's name, or how naming it is going, or failing both its time;
+// below it, small, its time, or what went wrong
 function labelRow(row) {
 	const status = transcribing.get(Number(row.dataset.id))
-	row.querySelector(".when").textContent = status ? `${row.dataset.label} · ${status}` : row.dataset.label
-	// A reason it couldn't transcribe is shown whole, however many lines it takes
-	row.classList.toggle("trouble", status?.startsWith("COULDN'T") ?? false)
+	const title = status?.title || row.dataset.name || row.dataset.when
+	row.querySelector(".words").textContent = title
+	if (!status?.working) row.querySelector(".dots").textContent = ""
+	row.querySelector(".when").textContent = status?.detail ?? (title === row.dataset.when ? "" : row.dataset.when)
+	row.classList.toggle("working", status?.working ?? false)
+	row.classList.toggle("trouble", status?.trouble ?? false)
 }
+
+// While a recording is being named, dots after its title come and go
+setInterval(() => {
+	for (const dots of recordingsList.querySelectorAll(".working .dots")) dots.textContent = ".".repeat((dots.textContent.length + 1) % 4)
+}, 400)
 
 // Whisper listens at 16 kHz, 30 seconds at a time: the start is enough to name a sound by
 async function at16k(samples, sampleRate) {
@@ -392,7 +403,8 @@ function nameFrom(text) {
 
 // The wheel's options, each with the picture in its slice (24 px square, drawn in strokes)
 function installing(href) {
-	return { label: "INSTALL", picture: "M12 4v11M7 10l5 5 5-5M5 20h14", act: () => location.href = `${href}?install` }
+	const installed = isInstalled(new URL(href, location.href).pathname)
+	return { label: installed ? "INSTALLED" : "INSTALL", unavailable: installed, picture: "M12 4v11M7 10l5 5 5-5M5 20h14", act: () => location.href = `${href}?install` }
 }
 
 function renaming(button) {
@@ -484,7 +496,7 @@ function openWheel(link, options, pointing = false) {
 		const to = middle + share / 2 - SLICE_GAP / 2
 		const large = to - from > 180 ? 1 : 0
 		const [pictureX, pictureY] = point((inner + outer) / 2, middle)
-		return `<path class="slice" d="M ${point(outer, from)} A ${outer} ${outer} 0 ${large} 1 ${point(outer, to)} L ${point(inner, to)} A ${inner} ${inner} 0 ${large} 0 ${point(inner, from)} Z"/>
+		return `<path class="slice${option.unavailable ? " unavailable" : ""}" d="M ${point(outer, from)} A ${outer} ${outer} 0 ${large} 1 ${point(outer, to)} L ${point(inner, to)} A ${inner} ${inner} 0 ${large} 0 ${point(inner, from)} Z"/>
 			<path class="picture" d="${option.picture}" transform="translate(${pictureX} ${pictureY}) scale(1.15) translate(-12 -12)"/>`
 	})
 	wheel.innerHTML = `<svg viewBox="${-outer} ${-outer} ${2 * outer} ${2 * outer}" width="${2 * outer}" height="${2 * outer}" style="left: ${x}px; top: ${y}px">
@@ -514,9 +526,11 @@ function aim(pointerX, pointerY) {
 	const degrees = Math.atan2(down, right) * 180 / Math.PI
 	const index = Math.floor(((((degrees + 90 + turning.share / 2) % 360) + 360) % 360) / turning.share)
 	const pulled = Math.hypot(right, down) > turning.radius * PULL_TO_CHOOSE
-	turning.chosen = pulled ? turning.options[index] : null
-	turning.slices.forEach((slice, sliceIndex) => slice.classList.toggle("chosen", pulled && sliceIndex === index))
-	turning.named.textContent = turning.chosen?.label ?? turning.name
+	const pointedAt = pulled ? turning.options[index] : null
+	// An option that's unavailable is named when pointed at, but never chosen
+	turning.chosen = pointedAt?.unavailable ? null : pointedAt
+	turning.slices.forEach((slice, sliceIndex) => slice.classList.toggle("chosen", turning.chosen !== null && sliceIndex === index))
+	turning.named.textContent = pointedAt?.label ?? turning.name
 }
 
 function letGo() {

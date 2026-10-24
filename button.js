@@ -15,6 +15,12 @@ if (openedToInstall) {
 	})
 }
 
+// Whether this button is installed, noted for the home page's wheel (see saved.js): it is when
+// it's just been installed, or opened as an app; it isn't when the browser offers to install it
+addEventListener("appinstalled", () => noteInstalled(location.pathname, true))
+addEventListener("beforeinstallprompt", () => noteInstalled(location.pathname, false))
+if (matchMedia("(display-mode: standalone)").matches) noteInstalled(location.pathname, true)
+
 const folder = location.pathname.split("/").at(-2)
 const thisSound = SOUNDS.find((sound) => sound.folder === folder) ?? await savedButton(folder)
 

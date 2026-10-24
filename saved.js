@@ -51,6 +51,18 @@ function deleteRecording(id) {
 	return saved("recordings", "readwrite", (recordings) => recordings.delete(id))
 }
 
+// Which buttons are installed as apps on this device, by their pages' paths. Browsers don't say,
+// so each button's page notes it for itself (see button.js); an uninstalled button is only
+// noticed when next opened in the browser
+function isInstalled(path) {
+	return JSON.parse(localStorage.getItem("installed") ?? "[]").includes(path)
+}
+
+function noteInstalled(path, installed) {
+	const others = JSON.parse(localStorage.getItem("installed") ?? "[]").filter((other) => other !== path)
+	localStorage.setItem("installed", JSON.stringify(installed ? [...others, path] : others))
+}
+
 // sound: a WAV, like a recording's
 function addButton(sound, name, hue) {
 	const id = crypto.randomUUID().slice(0, 8)
@@ -81,8 +93,12 @@ function savedButton(id) {
 	return saved("buttons", "readonly", (buttons) => buttons.get(id))
 }
 
-// A recording, from its blocks, without the silence either side, so a press sounds at once, and brought up to
-// full volume, so a quiet recording still punches. Nothing worth keeping gives null
+// A recording, from its blocks, without the quiet either side, so a press sounds at once, and
+// brought up to full volume, so a quiet recording still punches. Loudness is measured over
+// short stretches (RMS): kept is everything from the first stretch to the last within 30 dB of
+// the loudest, or, in a noisy room, louder than the background (its quietest tenth) by 6 dB.
+// Nothing worth keeping gives null
+const STRETCH = 0.02 // seconds
 function trimmed(blocks, sampleRate) {
 	const samples = new Float32Array(blocks.reduce((total, block) => total + block.length, 0))
 	let offset = 0
@@ -90,12 +106,26 @@ function trimmed(blocks, sampleRate) {
 		samples.set(block, offset)
 		offset += block.length
 	}
-	const loudest = samples.reduce((peak, sample) => Math.max(peak, Math.abs(sample)), 0)
-	if (loudest < 0.01) return null
-	const begins = Math.max(0, samples.findIndex((sample) => Math.abs(sample) > loudest * 0.05) - sampleRate * 0.01)
-	const ends = Math.min(samples.length, samples.findLastIndex((sample) => Math.abs(sample) > loudest * 0.03) + sampleRate * 0.05)
+	const peak = samples.reduce((loudest, sample) => Math.max(loudest, Math.abs(sample)), 0)
+	if (peak < 0.01) return null
+	const stretch = Math.round(STRETCH * sampleRate)
+	const loudness = Array.from({ length: Math.floor(samples.length / stretch) }, (_, index) => {
+		let energy = 0
+		for (let i = index * stretch; i < (index + 1) * stretch; i++) energy += samples[i] ** 2
+		return Math.sqrt(energy / stretch)
+	})
+	const loudest = Math.max(...loudness)
+	const background = [...loudness].sort((a, b) => a - b)[Math.floor(loudness.length / 10)]
+	const decibels = (dB) => 10 ** (dB / 20)
+	// Never above half the loudest, so a recording that's loud all through is kept whole
+	const threshold = Math.min(Math.max(loudest * decibels(-30), background * decibels(6)), loudest * decibels(-6))
+	const first = loudness.findIndex((level) => level >= threshold)
+	const last = loudness.findLastIndex((level) => level >= threshold)
+	// A breath of lead-in, and a longer tail, so a word's ending fades out rather than stops
+	const begins = Math.max(0, first * stretch - sampleRate * 0.01)
+	const ends = Math.min(samples.length, (last + 1) * stretch + sampleRate * 0.1)
 	if (ends - begins < sampleRate * 0.1) return null
-	return samples.slice(begins, ends).map((sample) => (sample / loudest) * 0.9)
+	return samples.slice(begins, ends).map((sample) => (sample / peak) * 0.9)
 }
 
 // Mono, 16-bit
