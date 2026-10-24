@@ -2,22 +2,51 @@
 <html lang="en">
 <head>
 	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-	<title>Kakegoe</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<title>Soundboard</title>
 	<meta name="theme-color" content="#141010">
-	<meta name="mobile-web-app-capable" content="yes">
-	<meta name="apple-mobile-web-app-capable" content="yes">
-	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-	<meta name="apple-mobile-web-app-title" content="Kakegoe">
-	<!-- The manifest scopes this app to index.html alone, not the whole folder, or phones would count
-	     every other sound's page, in the folders below, as part of this app and refuse to install it.
-	     Its id keeps it the app already on phones from when it started at the folder -->
-	<link rel="manifest" href="manifest.webmanifest">
-	<link rel="icon" href="icon-192.png">
-	<link rel="apple-touch-icon" href="apple-touch-icon.png">
-	<link rel="stylesheet" href="button.css">
-	<script type="module" src="button.js"></script>
+	<!-- No manifest: an app installed from here would claim every sound's folder below, and phones
+	     would then refuse to install the sounds as apps of their own -->
+	<style>
+		body {
+			margin: 0;
+			min-height: 100vh;
+			box-sizing: border-box;
+			padding: 8vmin;
+			display: flex;
+			flex-wrap: wrap;
+			justify-content: center;
+			align-content: center;
+			gap: 8vmin;
+			background: #141010;
+			font: 500 1.1rem system-ui, sans-serif;
+		}
+		.sound {
+			display: grid;
+			justify-items: center;
+			gap: 1.2rem;
+			color: hsl(var(--hue) 70% 82%);
+			text-decoration: none;
+			-webkit-tap-highlight-color: transparent;
+		}
+		/* A small copy of the sound's button, in its color */
+		.sound::before {
+			content: "";
+			width: min(30vmin, 140px);
+			aspect-ratio: 1;
+			border-radius: 50%;
+			background: radial-gradient(circle at 38% 32%, hsl(var(--hue) 100% 68%), hsl(var(--hue) 83% 46%) 45%, hsl(var(--hue) 89% 30%) 100%);
+			box-shadow: 0 1vmin 0 hsl(var(--hue) 94% 18%), 0 2vmin 4vmin rgba(0, 0, 0, 0.6), inset 0 -0.6vmin 2vmin rgba(0, 0, 0, 0.35);
+		}
+	</style>
+	<script src="sounds.js"></script>
 </head>
-<!-- Split where the shouted "yo" ends and its ethereal tail takes over (measured) -->
-<body style="--hue: 3" data-split="1.17"></body>
+<body>
+	<script>
+		for (const { folder, name, hue } of SOUNDS) {
+			document.body.insertAdjacentHTML("beforeend", `<a class="sound" href="${folder}/" style="--hue: ${hue}">${name}</a>`)
+		}
+		navigator.serviceWorker?.register("sw.js")
+	</script>
+</body>
 </html>

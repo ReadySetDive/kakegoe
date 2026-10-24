@@ -1,9 +1,11 @@
-// The button shared by every sound. Each sound's page is a folder holding its sound.mp3, and a body
-// that sets the button's --hue and where key 0 splits the sound (data-split, in seconds)
+// The button shared by every sound. Each sound's page sits in its own folder, named in sounds.js
+// (loaded by the page ahead of this), beside its sound.mp3
+const thisSound = SOUNDS.find(({ folder }) => folder === location.pathname.split("/").at(-2))
 
 // Lets iPhones play it even with the ring/silent switch on silent
 if (navigator.audioSession) navigator.audioSession.type = "playback"
 
+document.body.style.setProperty("--hue", thisSound.hue)
 document.body.insertAdjacentHTML("afterbegin", `
 	<div class="socket"><button class="record" aria-label="Hold to record your own sound"><svg class="taken" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" pathLength="1"/></svg></button></div>
 	<button class="call" aria-label="Play the call"><span class="dial"><span class="dot" title="Drag to change pitch"></span></span><svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="49" pathLength="1"/><circle class="head" cx="99" cy="50" r="1.6"/></svg></button>
@@ -40,13 +42,12 @@ const TILT_DEGREES = 8
 // Number keys 1-8 play the call up a major scale, do to do, in semitones above as recorded
 const SCALE = [0, 2, 4, 5, 7, 9, 11, 12]
 // Key 0 cycles what the number keys play: the whole call, or just the part before or after the
-// page's split. A sound you record yourself has no such parts, so then there is only the whole of it
+// sound's split. A sound you record yourself has no such parts, so then there is only the whole of it
 const WHOLE = { from: 0, to: Infinity }
-const split = Number(document.body.dataset.split)
 let parts = [
 	WHOLE,
-	{ from: 0, to: split },
-	{ from: split, to: Infinity },
+	{ from: 0, to: thisSound.split },
+	{ from: thisSound.split, to: Infinity },
 ]
 // Four anticlockwise turns of the knob unscrew the button, revealing a record button beneath
 const TURNS_TO_LIFT = 4

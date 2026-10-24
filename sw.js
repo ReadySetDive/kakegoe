@@ -1,24 +1,23 @@
 // Keeps the app working with no signal, while always showing the latest version when online:
 // every request goes to the network first (revalidating past the browser's HTTP cache), and the
 // cached copy is only the fallback. Updates to the site therefore need no version bumps here.
-const CACHE = "kakegoe"
-// Every sound's folder holds the same files; a new sound needs only its folder adding here
-const SOUNDS = [
-	"./",
-	"fahhh/",
-]
+const CACHE = "soundboard"
+importScripts("sounds.js")
 const FILES = [
+	"./",
+	"index.html",
+	"sounds.js",
 	"button.js",
 	"button.css",
 	"voices.js",
-	...SOUNDS.flatMap((folder) => [
-		folder,
-		`${folder}index.html`,
-		`${folder}sound.mp3`,
-		`${folder}manifest.webmanifest`,
-		`${folder}icon-192.png`,
-		`${folder}icon-512.png`,
-		`${folder}apple-touch-icon.png`,
+	...SOUNDS.flatMap(({ folder }) => [
+		`${folder}/`,
+		`${folder}/index.html`,
+		`${folder}/sound.mp3`,
+		`${folder}/manifest.webmanifest`,
+		`${folder}/icon-192.png`,
+		`${folder}/icon-512.png`,
+		`${folder}/apple-touch-icon.png`,
 	]),
 ]
 
