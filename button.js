@@ -3,8 +3,7 @@
 // buttons made on this device, ahead of this
 import { updates } from "./updates.js"
 
-// Opened by the home page's INSTALL: opening doesn't play the call, and the first press does
-// nothing but bring up the browser's offer to install, which a word under the button points to
+// Opened by the home page's INSTALL: the first press does nothing but bring up the browser's offer to install, which a word under the button points to
 // (iPhones make no such offer)
 const openedToInstall = new URLSearchParams(location.search).has("install")
 let installOffer = null
@@ -16,8 +15,8 @@ if (openedToInstall) {
 	})
 }
 
-// Opened by the home page's EDIT: the button can be cropped (see the crop arc below), and
-// opening it doesn't play the call. The site's own sounds can't be
+// Opened by the home page's EDIT: the button can be cropped (see the crop arc below). The site's
+// own sounds can't be
 const openedToEdit = new URLSearchParams(location.search).has("edit") && location.pathname.includes("/custom/")
 
 // Whether this button is installed, noted for the home page's wheel (see saved.js): it is when
@@ -713,27 +712,10 @@ function showEditor(node, samples, duration) {
 	})
 }
 
-// Opening the page, or coming back to it, plays the call once, so a shortcut to it on a home
-// screen or desktop is itself the button. Only while the browser allows sound without a touch:
-// a call it held back would otherwise go off late, alongside the touch that finally wakes it
-const WAKE_WAIT = 200 // ms the browser has to wake the audio before it counts as not allowed
-let away = !openedToInstall && !openedToEdit // opening the page counts as coming back
-async function comeBack() {
-	if (!away || document.hidden) return
-	away = false
-	// A newer version published meanwhile: coming back reloads into it, which plays the call anyway
-	if (updates.waiting) return location.reload()
-	// A press that brought the page into focus has played already
-	if (held.size) return
-	const awake = await Promise.race([
-		audio.resume().then(() => true),
-		new Promise((resolve) => setTimeout(resolve, WAKE_WAIT, false)),
-	])
-	if (awake) play()
-}
+// Opening the page plays nothing, so it never goes off unasked. A newer version published while
+// away: coming back reloads into it
+const comeBack = () => !document.hidden && updates.waiting && location.reload()
 addEventListener("focus", comeBack)
-addEventListener("blur", () => away = true)
-document.addEventListener("visibilitychange", () => document.hidden ? away = true : comeBack())
-comeBack()
+document.addEventListener("visibilitychange", comeBack)
 
 navigator.serviceWorker?.register(new URL("sw.js", import.meta.url))
