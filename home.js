@@ -186,8 +186,7 @@ fetching.addEventListener("close", () => {
 	for (const player of found.querySelectorAll("audio")) player.pause()
 })
 
-// What's entered is an address, of a sound to add or a web page to look for sounds on, or else
-// words to search myinstants for
+// What's entered is an address, of a sound to add or a web page to look for sounds on
 fetchingForm.addEventListener("submit", async (event) => {
 	event.preventDefault()
 	const entered = fetchingForm.elements.wanted.value.trim()
@@ -195,29 +194,13 @@ fetchingForm.addEventListener("submit", async (event) => {
 	found.replaceChildren()
 	// An address typed without its https:// still has a dot in it, and no spaces
 	const wanted = /^[^\s:]+\.[^\s]+$/.test(entered) ? `https://${entered}` : entered
-	if (!/^https?:$/.test(URL.parse(wanted)?.protocol)) return search(entered)
+	if (!/^https?:$/.test(URL.parse(wanted)?.protocol)) return explain("That isn't a web address.")
 	const { response, at } = await fetchFromWeb(wanted).catch(() => ({}))
 	if (!response) return explain("Couldn't reach that address.")
 	if (!response.ok) return explain(response.status === 415 ? "That address is neither a web page nor a sound." : "Nothing to be found at that address.")
 	if (/^(text\/html|application\/xhtml)/.test(response.headers.get("content-type"))) return listSounds(await response.text(), at)
 	await addFromWeb(await response.blob(), nameOf(new URL(at).pathname))
 })
-
-// Myinstants' search, read like any other page, but just its results, by their titles, not the
-// other sounds it shows alongside
-async function search(words) {
-	const { response, at } = await fetchFromWeb(`https://www.myinstants.com/en/search/?name=${encodeURIComponent(words)}`).catch(() => ({}))
-	// Myinstants answers a search that finds nothing as a page not found
-	if (response?.status === 404) return explain(`No sounds found for "${words}".`)
-	if (!response?.ok) return explain("Couldn't reach myinstants to search it.")
-	const page = new DOMParser().parseFromString(await response.text(), "text/html")
-	const results = [...page.querySelectorAll("#instants_container .instant")].map((instant) => ({
-		address: new URL(instant.querySelector("button[onclick^=play]").getAttribute("onclick").match(/play\('([^']+)'/)[1], at).href,
-		name: instant.querySelector(".instant-link").textContent.trim(),
-	}))
-	if (!results.length) return explain(`No sounds found for "${words}".`)
-	found.replaceChildren(...results.slice(0, LONGEST_FOUND).map(({ address, name }) => foundRow(address, name)))
-}
 
 async function addFromWeb(sound, name) {
 	fetching.close()
@@ -250,7 +233,7 @@ function soundsIn(text, at) {
 	return [...new Set(addresses)]
 }
 
-// A sound found on a page or by a search: played straight from its site, which needs no
+// A sound found on a page: played straight from its site, which needs no
 // permission, and only fetched, through the relay if need be, when added. Longer than
 // LONGEST_SOUND, it can be played but not added
 function foundRow(address, name) {
