@@ -19,6 +19,11 @@
 // they cross-fade. Unaligned grains half-cancel each other at a steady rate, which is what makes
 // plain granular stretching flutter and chop when slowed down; aligned ones join seamlessly. At
 // normal speed and pitch the best match is no slide at all, so the recording comes back untouched.
+//
+// Each end of a copy's part is faded over a few milliseconds, and nothing beyond it sounds, as if
+// the recording had been cut there cleanly. Without that, the grains still sounding when a copy
+// reaches the end are cut off at full strength, which pops wherever the sound is loud: at a crop,
+// or at the end of a recording that stops abruptly.
 
 const GRAIN = 1024 // samples, about 23 ms
 const HOP = GRAIN / 2 // two grains always overlap, and their fades sum to exactly one
@@ -30,6 +35,7 @@ const SPEED_EASE = 0.2 // share of the way a copy's speed moves to the asked-for
 const REPORT_EVERY = 4 // blocks between progress reports, about 12 ms
 const SCRUB_CATCH_UP = 128 * 6 // a scrubbed copy closes the gap to where it is dragged over about this many samples
 const SCRUB_FULL = 0.5 // a scrubbed copy moving at this share of normal speed or faster sounds at full volume
+const EDGE = Math.round(0.005 * sampleRate) // samples over which each end of a part fades
 
 class Voices extends AudioWorkletProcessor {
 	static get parameterDescriptors() {
@@ -95,10 +101,11 @@ class Voices extends AudioWorkletProcessor {
 			if (!voice.grains) {
 				voice.from = Math.round(voice.from * sampleRate)
 				voice.to = Math.min(length - 2, Math.round(voice.to * sampleRate))
-				// Starting forwards at the very beginning, a copy begins with a grain already at full
-				// strength, so its first moment is not faded in; starting elsewhere, it fades in to avoid a click
-				const grains = voice.from === 0 && this.baseline.speed > 0 ? [{ start: -HOP * pitch, age: HOP, direction: 1 }] : []
-				Object.assign(voice, { position: this.baseline.speed < 0 ? voice.to - 1 : voice.from, untilGrain: 0, grains })
+				// A copy begins with a grain already halfway through, at full strength, so its first moment
+				// isn't faded in by the grain's own fade; the part's edge fade is what keeps it from clicking
+				const direction = this.baseline.speed < 0 ? -1 : 1
+				const position = direction < 0 ? voice.to - 1 : voice.from
+				Object.assign(voice, { position, untilGrain: 0, grains: [{ start: position - HOP * pitch * direction, age: HOP, direction }] })
 			}
 			const scrubbing = voice.scrubTo !== null
 			let wanted = (voice.held ? this.heldSpeed : 1) * this.baseline.speed
@@ -126,12 +133,13 @@ class Voices extends AudioWorkletProcessor {
 				for (const grain of voice.grains) {
 					const at = grain.start + grain.age * pitch * grain.direction
 					const fade = FADE[grain.age++]
-					if (at < 0 || at >= length - 1) continue
+					const edge = Math.min(1, (at - voice.from) / EDGE, (voice.to - at) / EDGE)
+					if (edge <= 0) continue
 					const index = Math.floor(at)
 					const between = at - index
 					for (let channel = 0; channel < out.length; channel++) {
 						const samples = this.recording[Math.min(channel, this.recording.length - 1)]
-						out[channel][i] += (samples[index] + (samples[index + 1] - samples[index]) * between) * fade * voice.loudness
+						out[channel][i] += (samples[index] + (samples[index + 1] - samples[index]) * between) * fade * edge * voice.loudness
 					}
 				}
 				if (voice.grains[0]?.age >= GRAIN) voice.grains.shift()
