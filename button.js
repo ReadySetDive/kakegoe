@@ -91,7 +91,7 @@ const audio = new AudioContext()
 const volume = audio.createGain()
 // Many overlapping calls at up to 4x volume would clip; this holds them just under full scale
 const limiter = new DynamicsCompressorNode(audio, { threshold: -3, knee: 0, ratio: 20, attack: 0.002, release: 0.1 })
-// Every press becomes a voice in one granular player (voices.js), so pitch and speed bend
+// Every press becomes a voice in one Paulstretch player (voices.js), so pitch and speed bend
 // independently, live, on every call already sounding. Shared files sit beside this one; the
 // sound sits beside the page
 const voices = audio.audioWorklet.addModule(new URL("voices.js", import.meta.url)).then(async () => {

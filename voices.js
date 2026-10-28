@@ -1,41 +1,77 @@
-// Plays any number of overlapping copies of the call. Each copy is rebuilt from short, overlapping,
-// faded grains of the recording: how fast it moves through the recording is its speed, and how fast
-// each grain is read is its pitch, so the two bend independently. Pitch (the knob) bends every copy
-// at once; each copy can also carry its own pitch on top (a note played on the number keys), and
-// play only part of the recording (from and to, in seconds).
+// Plays any number of overlapping copies of the call. Each copy is rebuilt by Paulstretch: every
+// few hundredths of a second it takes a long window of the recording around where it is, turns it
+// into its spectrum, gives every frequency a random phase and turns it back. Only how loud each
+// frequency is survives, so a frame sounds like that moment smeared out, and frames overlap into a
+// smooth sound with no repeating rhythm, however slowly the copy moves, even standing still. How
+// fast a copy moves through the recording is its speed; pitch slides the spectrum up or down, so the
+// two bend independently. Pitch (the knob) bends every copy at once; each copy can also carry its own
+// pitch on top (a note played on the number keys), and play only part of the recording (from and
+// to, in seconds).
 //
 // A copy whose press is still held is steered: its speed follows the bends and the phone's roll,
-// down to zero, holding one moment indefinitely, and below, where grains read backwards so it plays
-// truly reversed. Held, it never runs off either end of its part; it waits there, silent, to be
-// played on or back again. Let go, it plays on at normal speed from wherever it is. A copy can
-// also be scrubbed: dragged to places in its part, sounding only while it moves, like tape under a
-// finger. The progress of every held copy is reported, so the page can show and scrub it.
+// down to zero, holding one moment indefinitely, and below, where it moves backwards through the
+// recording. Held, it never runs off either end of its part; it waits there, silent, to be played on
+// or back again. Let go, it plays on at normal speed from wherever it is. A copy can also be
+// scrubbed: dragged to places in its part, sounding only while it moves, like tape under a finger.
+// The progress of every held copy is reported, so the page can show and scrub it.
 //
 // A button can have its own speed and pitch, which every copy starts from and bends on top of.
 // Backwards (a speed below zero), a copy starts at the end of its part and plays to the start.
 //
-// Grains are placed by WSOLA: each new grain may slide a few milliseconds from where it would
-// naturally start, to wherever the recording best matches what the previous grain is playing as
-// they cross-fade. Unaligned grains half-cancel each other at a steady rate, which is what makes
-// plain granular stretching flutter and chop when slowed down; aligned ones join seamlessly. At
-// normal speed and pitch the best match is no slide at all, so the recording comes back untouched.
-//
-// Each end of a copy's part is faded over a few milliseconds, and nothing beyond it sounds, as if
-// the recording had been cut there cleanly. Without that, the grains still sounding when a copy
-// reaches the end are cut off at full strength, which pops wherever the sound is loud: at a crop,
-// or at the end of a recording that stops abruptly.
+// Each end of a copy's part is faded over a few milliseconds, and nothing beyond it is heard, as if
+// the recording had been cut there cleanly, so a crop never pops however loud the sound is there.
 
-const GRAIN = 1024 // samples, about 23 ms
-const HOP = GRAIN / 2 // two grains always overlap, and their fades sum to exactly one
-const FADE = Float32Array.from({ length: GRAIN }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / GRAIN))
-const SEARCH = 256 // how far, in samples either way, a grain may slide to line up: a voice's pitch period or two
-const MATCH = 256 // how many samples are compared when judging a line-up
-const STRIDE = 4 // compare every fourth sample and slide in steps of four: plenty for a smooth join, and cheap
 const SPEED_EASE = 0.2 // share of the way a copy's speed moves to the asked-for one each 128-sample block, so changes never click
 const REPORT_EVERY = 4 // blocks between progress reports, about 12 ms
 const SCRUB_CATCH_UP = 128 * 6 // a scrubbed copy closes the gap to where it is dragged over about this many samples
 const SCRUB_FULL = 0.5 // a scrubbed copy moving at this share of normal speed or faster sounds at full volume
 const EDGE = Math.round(0.005 * sampleRate) // samples over which each end of a part fades
+
+const WINDOW = 8192 // samples, about 190 ms at 44.1 kHz
+const STEP = WINDOW / 2 // two frames always overlap
+const BITS = Math.log2(WINDOW)
+const HANN = Float32Array.from({ length: WINDOW }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / WINDOW))
+// Random-phase frames overlap as noise does, adding in power: sine fades squared sum to one. The
+// Hann window keeps 3/8 of the power
+const SINE = Float32Array.from({ length: WINDOW }, (_, i) => Math.sin((Math.PI * i) / WINDOW) * Math.sqrt(8 / 3))
+const COS = Float32Array.from({ length: WINDOW / 2 }, (_, i) => Math.cos((2 * Math.PI * i) / WINDOW))
+const SIN = Float32Array.from({ length: WINDOW / 2 }, (_, i) => -Math.sin((2 * Math.PI * i) / WINDOW))
+const REVERSED = Uint32Array.from({ length: WINDOW }, (_, i) => {
+	let r = 0
+	for (let b = 0; b < BITS; b++) r |= ((i >> b) & 1) << (BITS - 1 - b)
+	return r
+})
+
+// In place. Inverse by conjugating before and after, and dividing by the length
+function fft(re, im) {
+	for (let i = 0; i < WINDOW; i++) {
+		const j = REVERSED[i]
+		if (j > i) {
+			[re[i], re[j]] = [re[j], re[i]];
+			[im[i], im[j]] = [im[j], im[i]]
+		}
+	}
+	for (let size = 2; size <= WINDOW; size *= 2) {
+		const half = size / 2
+		const stride = WINDOW / size
+		for (let start = 0; start < WINDOW; start += size) {
+			for (let k = 0; k < half; k++) {
+				const a = start + k
+				const b = a + half
+				const c = COS[k * stride]
+				const s = SIN[k * stride]
+				const tre = re[b] * c - im[b] * s
+				const tim = re[b] * s + im[b] * c
+				re[b] = re[a] - tre
+				im[b] = im[a] - tim
+				re[a] += tre
+				im[a] += tim
+			}
+		}
+	}
+}
+
+const inside = (voice) => voice.position >= voice.from && voice.position < voice.to
 
 class Voices extends AudioWorkletProcessor {
 	static get parameterDescriptors() {
@@ -52,7 +88,7 @@ class Voices extends AudioWorkletProcessor {
 		this.port.onmessage = ({ data }) => {
 			if ("channels" in data) this.recording = data.channels
 			// note, from, to, and for a held press its id
-			else if ("note" in data) this.voices.push({ ...data, held: data.id !== undefined, scrubTo: null, speed: this.baseline.speed, loudness: 1, grains: null })
+			else if ("note" in data) this.voices.push({ ...data, held: data.id !== undefined, scrubTo: null, speed: this.baseline.speed, loudness: 1, frames: null })
 			else if ("release" in data) {
 				for (const voice of this.voices) if (voice.id === data.release) Object.assign(voice, { held: false, scrubTo: null })
 			} else if ("scrub" in data) {
@@ -64,32 +100,43 @@ class Voices extends AudioWorkletProcessor {
 		}
 	}
 
-	// Where, near `natural`, the recording best continues what is heard at `continuing`, both read
-	// `step` samples per sample (negative backwards). Searches outward from no slide and only moves
-	// for a strictly better match.
-	lineUp(natural, continuing, step) {
-		const samples = this.recording[0]
-		const readable = (start) => Math.min(start, start + MATCH * step) >= 0 && Math.max(start, start + MATCH * step) <= samples.length - 2
-		if (!readable(continuing)) return natural
-		let best = natural
-		let bestScore = -Infinity
-		for (let slide = 0; slide <= SEARCH; slide = slide > 0 ? -slide : -slide + STRIDE) {
-			const start = natural + slide
-			if (!readable(start)) continue
-			let together = 0
-			let energy = 1e-9
-			for (let j = 0; j < MATCH; j += STRIDE) {
-				const candidate = samples[Math.floor(start + j * step)]
-				together += candidate * samples[Math.floor(continuing + j * step)]
-				energy += candidate * candidate
+	// The moment around the copy's position, smeared: one channel per channel of the recording,
+	// each with the same random phases, so the stereo image holds. Made a step at a time, one step a
+	// block (see process), as making it all at once takes longer than a block lasts on a phone
+	*frame(voice) {
+		const phases = Float32Array.from({ length: WINDOW / 2 + 1 }, () => Math.random() * 2 * Math.PI)
+		const start = Math.floor(voice.position) - STEP
+		const channels = []
+		for (const samples of this.recording) {
+			const re = new Float32Array(WINDOW)
+			const im = new Float32Array(WINDOW)
+			for (let j = 0; j < WINDOW; j++) {
+				const at = start + j
+				const edge = Math.min(1, (at - voice.from) / EDGE, (voice.to - at) / EDGE)
+				if (edge > 0) re[j] = samples[at] * edge * HANN[j]
 			}
-			const score = together / Math.sqrt(energy)
-			if (score > bestScore + 1e-9) {
-				best = start
-				bestScore = score
+			fft(re, im)
+			yield
+			const loudness = Float32Array.from({ length: WINDOW / 2 + 1 }, (_, k) => Math.hypot(re[k], im[k]))
+			for (let k = 0; k <= WINDOW / 2; k++) {
+				const from = Math.round(k / voice.pitch)
+				// Shifted up, each pitch is spread over more of the spectrum, so it's spread thinner to keep its loudness
+				const level = from <= WINDOW / 2 ? loudness[from] / Math.sqrt(voice.pitch) : 0
+				// Conjugated for the inverse transform; the mirror half keeps the result real
+				re[k] = level * Math.cos(phases[k])
+				im[k] = -level * Math.sin(phases[k])
+				if (k > 0 && k < WINDOW / 2) {
+					re[WINDOW - k] = re[k]
+					im[WINDOW - k] = -im[k]
+				}
 			}
+			im[0] = 0
+			im[WINDOW / 2] = 0
+			fft(re, im)
+			yield
+			channels.push(re.map((value, j) => (value / WINDOW) * SINE[j]))
 		}
-		return best
+		return channels
 	}
 
 	process(_inputs, outputs, parameters) {
@@ -97,15 +144,18 @@ class Voices extends AudioWorkletProcessor {
 		const out = outputs[0]
 		const length = this.recording[0]?.length ?? 0
 		for (const voice of this.voices) {
-			const pitch = knobPitch * voice.note * this.baseline.pitch
-			if (!voice.grains) {
+			voice.pitch = knobPitch * voice.note * this.baseline.pitch
+			if (!voice.frames) {
 				voice.from = Math.round(voice.from * sampleRate)
 				voice.to = Math.min(length - 2, Math.round(voice.to * sampleRate))
-				// A copy begins with a grain already halfway through, at full strength, so its first moment
-				// isn't faded in by the grain's own fade; the part's edge fade is what keeps it from clicking
-				const direction = this.baseline.speed < 0 ? -1 : 1
-				const position = direction < 0 ? voice.to - 1 : voice.from
-				Object.assign(voice, { position, untilGrain: 0, grains: [{ start: position - HOP * pitch * direction, age: HOP, direction }] })
+				// making: the next frame, while it's being made; next: that frame, made and waiting to be due
+				Object.assign(voice, { position: this.baseline.speed < 0 ? voice.to - 1 : voice.from, untilFrame: 0, frames: [], making: null, next: null })
+			}
+			// Held outside its part, a copy waits there, silent, starting no frames
+			if (!voice.making && !voice.next && inside(voice)) voice.making = this.frame(voice)
+			if (voice.making) {
+				const { done, value } = voice.making.next()
+				if (done) Object.assign(voice, { making: null, next: value })
 			}
 			const scrubbing = voice.scrubTo !== null
 			let wanted = (voice.held ? this.heldSpeed : 1) * this.baseline.speed
@@ -118,35 +168,25 @@ class Voices extends AudioWorkletProcessor {
 			const loudness = scrubbing ? Math.min(1, Math.abs(voice.speed) / SCRUB_FULL) : 1
 			voice.loudness += (loudness - voice.loudness) * 0.3
 			for (let i = 0; i < out[0].length; i++) {
-				if (voice.untilGrain-- <= 0 && voice.position >= voice.from && voice.position < voice.to) {
-					const direction = voice.speed < 0 ? -1 : 1
-					const previous = voice.grains[voice.grains.length - 1]
-					const continuing = previous && previous.start + previous.age * pitch * previous.direction
-					// Grains only line up with ones read the same way; at a reversal they just cross-fade
-					const start = previous?.direction === direction ? this.lineUp(voice.position, continuing, pitch * direction) : voice.position
-					voice.grains.push({ start, age: 0, direction })
-					voice.untilGrain = HOP - 1
+				if (voice.untilFrame-- <= 0 && voice.next) {
+					voice.frames.push({ channels: voice.next, age: 0 })
+					voice.next = null
+					voice.untilFrame = STEP - 1
 				}
 				voice.position += voice.speed
-				// Held, a copy waits just outside either end of its part, where no grains start
+				// Held, a copy waits just outside either end of its part
 				if (voice.held) voice.position = Math.max(voice.from - 1, Math.min(voice.to, voice.position))
-				for (const grain of voice.grains) {
-					const at = grain.start + grain.age * pitch * grain.direction
-					const fade = FADE[grain.age++]
-					const edge = Math.min(1, (at - voice.from) / EDGE, (voice.to - at) / EDGE)
-					if (edge <= 0) continue
-					const index = Math.floor(at)
-					const between = at - index
+				for (const frame of voice.frames) {
 					for (let channel = 0; channel < out.length; channel++) {
-						const samples = this.recording[Math.min(channel, this.recording.length - 1)]
-						out[channel][i] += (samples[index] + (samples[index + 1] - samples[index]) * between) * fade * edge * voice.loudness
+						out[channel][i] += frame.channels[Math.min(channel, frame.channels.length - 1)][frame.age] * voice.loudness
 					}
+					frame.age++
 				}
-				if (voice.grains[0]?.age >= GRAIN) voice.grains.shift()
+				if (voice.frames[0]?.age >= WINDOW) voice.frames.shift()
 			}
 		}
-		this.voices = this.voices.filter((voice) => voice.held || (voice.position >= voice.from && voice.position < voice.to) || voice.grains.length)
-		const pressed = this.voices.filter((voice) => voice.held && voice.grains)
+		this.voices = this.voices.filter((voice) => voice.held || inside(voice) || voice.making || voice.next || voice.frames.length)
+		const pressed = this.voices.filter((voice) => voice.held && voice.frames)
 		if (++this.blocks % REPORT_EVERY === 0 && pressed.length) {
 			this.port.postMessage({ progress: pressed.map((voice) => ({ id: voice.id, through: (voice.position - voice.from) / (voice.to - voice.from) })) })
 		}
