@@ -18,15 +18,14 @@
 // A button can have its own speed and pitch, which every copy starts from and bends on top of.
 // Backwards (a speed below zero), a copy starts at the end of its part and plays to the start.
 //
-// A copy starts at full strength, not swelling in as frames otherwise do, and stops where its part
-// ends, as a recording cut there would, not ringing on through its last frames. Every frame is taken
-// from inside its part, so nothing beyond a crop is ever heard and no frame is left half empty.
+// Each end of a copy's part is faded over a few milliseconds, and nothing beyond it is heard, as if
+// the recording had been cut there cleanly, so a crop never pops however loud the sound is there.
 
 const SPEED_EASE = 0.2 // share of the way a copy's speed moves to the asked-for one each 128-sample block, so changes never click
 const REPORT_EVERY = 4 // blocks between progress reports, about 12 ms
 const SCRUB_CATCH_UP = 128 * 6 // a scrubbed copy closes the gap to where it is dragged over about this many samples
 const SCRUB_FULL = 0.5 // a scrubbed copy moving at this share of normal speed or faster sounds at full volume
-const STOP = Math.round(0.005 * sampleRate) // samples a copy takes to go quiet past the end of its part: any quicker pops
+const EDGE = Math.round(0.005 * sampleRate) // samples over which each end of a part fades
 
 const WINDOW = 8192 // samples, about 190 ms at 44.1 kHz
 const STEP = WINDOW / 2 // two frames always overlap
@@ -105,20 +104,17 @@ class Voices extends AudioWorkletProcessor {
 	// through one transform together, left as the real part and right as the imaginary, which halves
 	// the work, and get the same random phases, so the stereo image holds. Made in two steps, one a
 	// block (see process), as making it all at once takes longer than a block lasts on a phone
-	// ahead: how many samples from now the frame's middle, its loudest moment, will be heard, so it's
-	// made from where the copy will be then
-	*frame(voice, ahead) {
+	*frame(voice) {
 		const [left, right = left] = this.recording
-		const middle = Math.max(voice.from + STEP, Math.min(voice.to - STEP, Math.floor(voice.position + voice.speed * ahead)))
-		const start = middle - STEP
+		const start = Math.floor(voice.position) - STEP
 		const re = new Float32Array(WINDOW)
 		const im = new Float32Array(WINDOW)
 		for (let j = 0; j < WINDOW; j++) {
 			const at = start + j
-			// Only a part shorter than a frame leaves any of it outside
-			if (at >= voice.from && at < voice.to) {
-				re[j] = left[at] * HANN[j]
-				im[j] = right[at] * HANN[j]
+			const edge = Math.min(1, (at - voice.from) / EDGE, (voice.to - at) / EDGE)
+			if (edge > 0) {
+				re[j] = left[at] * edge * HANN[j]
+				im[j] = right[at] * edge * HANN[j]
 			}
 		}
 		fft(re, im)
@@ -167,12 +163,10 @@ class Voices extends AudioWorkletProcessor {
 				voice.from = Math.round(voice.from * sampleRate)
 				voice.to = Math.min(length - 2, Math.round(voice.to * sampleRate))
 				// making: the next frame, while it's being made; next: that frame, made and waiting to be due
-				Object.assign(voice, { position: this.baseline.speed < 0 ? voice.to - 1 : voice.from, untilFrame: 0, frames: [], making: null, next: null, sounding: 1 })
+				Object.assign(voice, { position: this.baseline.speed < 0 ? voice.to - 1 : voice.from, untilFrame: 0, frames: [], making: null, next: null })
 			}
 			// Held outside its part, a copy waits there, silent, starting no frames
-			if (!voice.making && !voice.next && inside(voice)) {
-				voice.making = this.frame(voice, voice.frames.length ? Math.max(0, voice.untilFrame) + STEP : 0)
-			}
+			if (!voice.making && !voice.next && inside(voice)) voice.making = this.frame(voice)
 			if (voice.making) {
 				const { done, value } = voice.making.next()
 				if (done) Object.assign(voice, { making: null, next: value })
@@ -189,22 +183,16 @@ class Voices extends AudioWorkletProcessor {
 			voice.loudness += (loudness - voice.loudness) * 0.3
 			for (let i = 0; i < out[0].length; i++) {
 				if (voice.untilFrame-- <= 0 && voice.next) {
-					// The first frame starts halfway through, at full strength, and the next is due at once
-					// to swell in as it fades
-					const first = !voice.frames.length
-					voice.frames.push({ channels: voice.next, age: first ? STEP : 0 })
+					voice.frames.push({ channels: voice.next, age: 0 })
 					voice.next = null
-					voice.untilFrame = first ? 0 : STEP - 1
+					voice.untilFrame = STEP - 1
 				}
 				voice.position += voice.speed
 				// Held, a copy waits just outside either end of its part
 				if (voice.held) voice.position = Math.max(voice.from - 1, Math.min(voice.to, voice.position))
-				// Past either end, it goes quiet and lets its frames go; back inside, it starts afresh at full strength
-				voice.sounding = inside(voice) ? 1 : Math.max(0, voice.sounding - 1 / STOP)
-				if (voice.sounding === 0) Object.assign(voice, { frames: [], making: null, next: null })
 				for (const frame of voice.frames) {
 					for (let channel = 0; channel < out.length; channel++) {
-						out[channel][i] += frame.channels[channel][frame.age] * voice.loudness * voice.sounding
+						out[channel][i] += frame.channels[channel][frame.age] * voice.loudness
 					}
 					frame.age++
 				}
