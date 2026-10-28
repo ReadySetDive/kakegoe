@@ -100,43 +100,57 @@ class Voices extends AudioWorkletProcessor {
 		}
 	}
 
-	// The moment around the copy's position, smeared: one channel per channel of the recording,
-	// each with the same random phases, so the stereo image holds. Made a step at a time, one step a
+	// The moment around the copy's position, smeared, as a left and a right channel. Both channels go
+	// through one transform together, left as the real part and right as the imaginary, which halves
+	// the work, and get the same random phases, so the stereo image holds. Made in two steps, one a
 	// block (see process), as making it all at once takes longer than a block lasts on a phone
 	*frame(voice) {
-		const phases = Float32Array.from({ length: WINDOW / 2 + 1 }, () => Math.random() * 2 * Math.PI)
+		const [left, right = left] = this.recording
 		const start = Math.floor(voice.position) - STEP
-		const channels = []
-		for (const samples of this.recording) {
-			const re = new Float32Array(WINDOW)
-			const im = new Float32Array(WINDOW)
-			for (let j = 0; j < WINDOW; j++) {
-				const at = start + j
-				const edge = Math.min(1, (at - voice.from) / EDGE, (voice.to - at) / EDGE)
-				if (edge > 0) re[j] = samples[at] * edge * HANN[j]
+		const re = new Float32Array(WINDOW)
+		const im = new Float32Array(WINDOW)
+		for (let j = 0; j < WINDOW; j++) {
+			const at = start + j
+			const edge = Math.min(1, (at - voice.from) / EDGE, (voice.to - at) / EDGE)
+			if (edge > 0) {
+				re[j] = left[at] * edge * HANN[j]
+				im[j] = right[at] * edge * HANN[j]
 			}
-			fft(re, im)
-			yield
-			const loudness = Float32Array.from({ length: WINDOW / 2 + 1 }, (_, k) => Math.hypot(re[k], im[k]))
-			for (let k = 0; k <= WINDOW / 2; k++) {
-				const from = Math.round(k / voice.pitch)
-				// Shifted up, each pitch is spread over more of the spectrum, so it's spread thinner to keep its loudness
-				const level = from <= WINDOW / 2 ? loudness[from] / Math.sqrt(voice.pitch) : 0
-				// Conjugated for the inverse transform; the mirror half keeps the result real
-				re[k] = level * Math.cos(phases[k])
-				im[k] = -level * Math.sin(phases[k])
-				if (k > 0 && k < WINDOW / 2) {
-					re[WINDOW - k] = re[k]
-					im[WINDOW - k] = -im[k]
-				}
-			}
-			im[0] = 0
-			im[WINDOW / 2] = 0
-			fft(re, im)
-			yield
-			channels.push(re.map((value, j) => (value / WINDOW) * SINE[j]))
 		}
-		return channels
+		fft(re, im)
+		yield
+		// Each channel's loudness at each frequency, untangled from the shared spectrum by its symmetry
+		const half = WINDOW / 2
+		const leftLoudness = new Float32Array(half + 1)
+		const rightLoudness = new Float32Array(half + 1)
+		for (let k = 0; k <= half; k++) {
+			const mirror = (WINDOW - k) % WINDOW
+			leftLoudness[k] = Math.hypot(re[k] + re[mirror], im[k] - im[mirror]) / 2
+			rightLoudness[k] = Math.hypot(re[k] - re[mirror], im[k] + im[mirror]) / 2
+		}
+		// Shifted up, each pitch is spread over more of the spectrum, so it's spread thinner to keep its loudness
+		const thinned = 1 / Math.sqrt(voice.pitch)
+		for (let k = 0; k <= half; k++) {
+			const from = Math.round(k / voice.pitch)
+			const l = from <= half ? leftLoudness[from] * thinned : 0
+			const r = from <= half ? rightLoudness[from] * thinned : 0
+			// The two ends of the spectrum get no phase, as they must stay real
+			const phase = k === 0 || k === half ? 0 : Math.random() * 2 * Math.PI
+			const c = Math.cos(phase)
+			const s = Math.sin(phase)
+			// Left plus i times right, conjugated for the inverse transform; the mirror half keeps each channel real
+			re[k] = l * c - r * s
+			im[k] = -(l * s + r * c)
+			if (k > 0 && k < half) {
+				re[WINDOW - k] = l * c + r * s
+				im[WINDOW - k] = l * s - r * c
+			}
+		}
+		fft(re, im)
+		return [
+			re.map((value, j) => (value / WINDOW) * SINE[j]),
+			im.map((value, j) => (-value / WINDOW) * SINE[j]),
+		]
 	}
 
 	process(_inputs, outputs, parameters) {
@@ -178,7 +192,7 @@ class Voices extends AudioWorkletProcessor {
 				if (voice.held) voice.position = Math.max(voice.from - 1, Math.min(voice.to, voice.position))
 				for (const frame of voice.frames) {
 					for (let channel = 0; channel < out.length; channel++) {
-						out[channel][i] += frame.channels[Math.min(channel, frame.channels.length - 1)][frame.age] * voice.loudness
+						out[channel][i] += frame.channels[channel][frame.age] * voice.loudness
 					}
 					frame.age++
 				}
