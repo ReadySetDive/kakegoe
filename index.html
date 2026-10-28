@@ -34,6 +34,14 @@
 			font: 700 1.08rem OpenDyslexic, sans-serif;
 			letter-spacing: 0.02em;
 		}
+		.version {
+			position: fixed;
+			top: max(0.5rem, env(safe-area-inset-top));
+			left: max(0.6rem, env(safe-area-inset-left));
+			margin: 0;
+			font-size: 0.6rem;
+			color: #5a4f4d;
+		}
 		.sounds {
 			display: flex;
 			flex-wrap: wrap;
@@ -436,6 +444,8 @@
 	<script type="module" src="home.js"></script>
 </head>
 <body>
+	<!-- Raised by one with every update published, to tell at a glance whether a phone has the latest -->
+	<p class="version">V1</p>
 	<main class="sounds"></main>
 	<section class="recent" hidden>
 		<h2>RECENT</h2>
