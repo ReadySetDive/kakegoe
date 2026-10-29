@@ -158,8 +158,12 @@ document.querySelector(".from-file").addEventListener("click", () => fileInput.c
 fileInput.addEventListener("change", async () => {
 	const [file] = fileInput.files
 	fileInput.value = ""
-	await addFrom(file, nameOf(file.name)).catch(() => alert("That file isn't a sound this browser can play."))
+	await addFile(file)
 })
+
+async function addFile(file) {
+	await addFrom(file, nameOf(file.name)).catch(() => alert("That file isn't a sound this browser can play."))
+}
 
 // Sites that let other sites read them are fetched directly; the rest through the relay
 // (relay/worker.js), which fetches pages and sounds on the soundboard's behalf. at: the address
@@ -175,12 +179,14 @@ async function fetchFromWeb(url) {
 const found = fetching.querySelector(".found")
 const LONGEST_FOUND = 60 // sounds listed from one page
 
-document.querySelector(".from-web").addEventListener("click", () => {
+document.querySelector(".from-web").addEventListener("click", openFetching)
+
+function openFetching() {
 	fetchingForm.reset()
 	problem.hidden = true
 	found.replaceChildren()
 	fetching.showModal()
-})
+}
 // The sounds found on a page play while it's open, never after
 fetching.addEventListener("close", () => {
 	for (const player of found.querySelectorAll("audio")) player.pause()
@@ -668,3 +674,20 @@ naming.addEventListener("close", async () => {
 
 await adoptOldCrops()
 show()
+
+// Something shared to the soundboard from another app (see sw.js): a sound is added as a file
+// is, a link looked at as one typed in. Off the address at once, since coming back to the page
+// can reload it (see comeBack), which mustn't take it in twice
+const sharedWith = new URLSearchParams(location.search)
+history.replaceState(null, "", location.pathname)
+if (sharedWith.has("sound")) {
+	const cache = await caches.open("soundboard")
+	const sound = await (await cache.match("shared")).blob()
+	await cache.delete("shared")
+	await addFile(new File([sound], sharedWith.get("sound")))
+}
+if (sharedWith.has("address")) {
+	openFetching()
+	fetchingForm.elements.wanted.value = sharedWith.get("address")
+	fetchingForm.requestSubmit()
+}

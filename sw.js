@@ -61,6 +61,7 @@ self.addEventListener("fetch", (event) => {
 	const url = new URL(event.request.url)
 	// Sounds fetched from other sites, to be added to the soundboard, are copied in by the page
 	if (url.origin !== location.origin) return
+	if (event.request.method === "POST" && url.searchParams.has("share")) return event.respondWith(shared(event.request))
 	const custom = url.pathname.match(/\/custom\/(\w+)\/([\w.-]*)$/)
 	if (custom) return event.respondWith(customFile(...custom.slice(1)))
 	event.respondWith((async () => {
@@ -74,6 +75,20 @@ self.addEventListener("fetch", (event) => {
 		}
 	})())
 })
+
+// Shared to the soundboard from another app (the manifest's share_target), as the installed app
+// on Android. A sound is kept for the home page to add, like one from a file; a link, often
+// shared within text, is handed over to look for sounds at, like one typed in
+async function shared(request) {
+	const form = await request.formData()
+	const sound = form.get("sound")
+	if (sound) {
+		await (await caches.open(CACHE)).put("shared", new Response(sound))
+		return Response.redirect(`index.html?sound=${encodeURIComponent(sound.name)}`, 303)
+	}
+	const address = `${form.get("url")} ${form.get("text")}`.match(/https?:\/\/\S+/)?.[0]
+	return Response.redirect(address ? `index.html?address=${encodeURIComponent(address)}` : "index.html", 303)
+}
 
 // A button made on this device has no folder on the site: its files are made here, from storage,
 // the same files a built-in sound's folder holds, so it installs as an app of its own
